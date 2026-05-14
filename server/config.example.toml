@@ -1,0 +1,13 @@
+[server]
+host = "0.0.0.0"
+port = 8795
+
+# Leave empty to auto-generate server/.secret on first run.
+# For LAN, Tailscale, Cloudflare Tunnel, or public reverse proxy, keep strict_auth=true.
+shared_secret = ""
+strict_auth = true
+data_dir = "./data"
+
+[tmux]
+session = "cc"
+# bus_hook_path = "/absolute/path/to/server/bus_stop_hook.py"

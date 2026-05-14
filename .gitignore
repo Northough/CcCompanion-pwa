@@ -1,0 +1,48 @@
+# macOS / editor
+.DS_Store
+.idea/
+.vscode/
+
+# Reference repositories kept locally for comparison only.
+/Aelios/
+/cc-connect/
+
+# Old root-level design scratch/reference files. The real app lives in client/.
+/src/
+/index.html
+/android-frame.jsx
+/design-original/
+/Aelios_*_Plan.md
+
+# Local Claude settings. Keep the setup skill, ignore machine-local config.
+/.claude/*
+!/.claude/skills/
+!/.claude/skills/**
+
+# Frontend build/runtime
+/client/node_modules/
+/client/dist/
+/client/.vite/
+/client/*.log
+
+# Backend runtime, secrets, and user data
+/server/.secret
+/server/config.toml
+/server/config.*.toml
+/server/*.bak
+!/server/config.example.toml
+/server/data/
+/server/*.log
+/server/__pycache__/
+/server/*.pyc
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Logs / temp
+*.log
+/tmp/
+/temp/
