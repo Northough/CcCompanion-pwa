@@ -78,6 +78,10 @@
 .term-toolbar { display: flex; gap: 6px; padding: 8px 14px; flex-shrink: 0; align-items: center; }
 .term-select { background: var(--bg-2); color: var(--ink); border: 1px solid var(--line); border-radius: 10px; padding: 6px 10px; font: inherit; font-size: 13px; font-family: var(--font-mono); }
 .term-btn { background: var(--bg-2); color: var(--ink-2); border: 1px solid var(--line); border-radius: 10px; padding: 6px 12px; font: inherit; font-size: 12px; font-family: var(--font-mono); }
+.term-keypad { display: grid; grid-template-columns: repeat(6, minmax(38px, 1fr)); gap: 6px; padding: 0 14px 8px; flex-shrink: 0; }
+.term-keypad-spacer { min-width: 0; }
+.term-key { min-width: 0; height: 34px; border-radius: 10px; border: 1px solid var(--line); background: var(--surface-2); color: var(--ink); font: 700 15px/1 var(--font-mono); display: inline-flex; align-items: center; justify-content: center; box-shadow: var(--shadow-sm); }
+.term-key.wide { font-size: 11px; }
 .term-output { flex: 1; overflow: auto; padding: 12px 14px; background: #1B1814; color: #EFE6D3; font: 12px/1.4 var(--font-mono); white-space: pre; -webkit-overflow-scrolling: touch; }
 .term-input-bar { display: flex; gap: 8px; padding: 8px 14px; flex-shrink: 0; }
 .term-input { flex: 1; background: var(--bg-2); color: var(--ink); border: 1px solid var(--line); border-radius: 14px; padding: 8px 14px; font: inherit; font-family: var(--font-mono); font-size: 13px; outline: none; }

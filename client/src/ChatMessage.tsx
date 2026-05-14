@@ -87,7 +87,7 @@ function parseBlocks(text: string): Block[] {
 function UserMessage({ m }: { m: ChatRecord }) {
   const profile = useProfile();
   return (
-    <div style={{ display: 'flex', justifyContent: 'flex-end', margin: '6px 0 18px', alignItems: 'flex-end', gap: 8, minWidth: 0 }}>
+    <div style={{ display: 'flex', justifyContent: 'flex-end', margin: '6px 0 18px', alignItems: 'center', gap: 8, minWidth: 0 }}>
       <div style={{ maxWidth: 'calc(100% - 36px)', minWidth: 0, background: 'var(--user-bubble)', borderRadius: 20, padding: '12px 16px', color: 'var(--ink)', fontSize: 15.5, lineHeight: 1.55, display: 'flex', flexDirection: 'column', gap: 10, overflowWrap: 'anywhere', wordBreak: 'break-word' }}>
         {m.attachments && m.attachments.length > 0 && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>

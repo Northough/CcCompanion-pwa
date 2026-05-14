@@ -14,6 +14,7 @@ from datetime import datetime
 
 SHELL_PROMPTS = ("$", "%", "#", "❯", ">", "~]#", "]$")
 NOISE_KEYWORDS = ("Welcome to Claude Code", "Checking connectivity", "╭─", "╰─", "│", "Claude Code v")
+ASSISTANT_PREFIXES = ("⏺", "●", "•")
 
 
 def capture_tmux(session: str, lines: int = 10) -> str:
@@ -112,6 +113,17 @@ def extract_claude_reply(content: str) -> str | None:
     if not lines:
         return None
 
+    def is_assistant_line(line: str) -> bool:
+        stripped = line.strip()
+        return any(stripped.startswith(prefix) for prefix in ASSISTANT_PREFIXES)
+
+    def strip_assistant_prefix(line: str) -> str:
+        stripped = line.lstrip()
+        for prefix in ASSISTANT_PREFIXES:
+            if stripped.startswith(prefix):
+                return stripped[len(prefix):].lstrip()
+        return line
+
     # Find the latest idle marker (✻) line.
     marker_idx = -1
     for i, line in enumerate(lines):
@@ -123,7 +135,7 @@ def extract_claude_reply(content: str) -> str | None:
 
     start_idx = -1
     for i in range(marker_idx - 1, -1, -1):
-        if lines[i].strip().startswith("⏺"):
+        if is_assistant_line(lines[i]):
             start_idx = i
             break
         if lines[i].strip().startswith("❯"):
@@ -134,9 +146,8 @@ def extract_claude_reply(content: str) -> str | None:
     reply_lines = []
     for i in range(start_idx, marker_idx):
         line = lines[i].rstrip()
-        stripped = line.strip()
-        if stripped.startswith("⏺"):
-            line = line.replace("⏺", "", 1).lstrip()
+        if is_assistant_line(line):
+            line = strip_assistant_prefix(line)
         reply_lines.append(line)
 
     # Strip leading/trailing empty lines

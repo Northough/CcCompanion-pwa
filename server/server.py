@@ -382,6 +382,19 @@ class RequestHandler(BaseHTTPRequestHandler):
         if not lines:
             return None
 
+        assistant_prefixes = ("⏺", "●", "•")
+
+        def is_assistant_line(line: str) -> bool:
+            stripped = line.strip()
+            return any(stripped.startswith(prefix) for prefix in assistant_prefixes)
+
+        def strip_assistant_prefix(line: str) -> str:
+            stripped = line.lstrip()
+            for prefix in assistant_prefixes:
+                if stripped.startswith(prefix):
+                    return stripped[len(prefix):].lstrip()
+            return line
+
         marker_idx = -1
         for i, line in enumerate(lines):
             if "✻" in line:
@@ -391,7 +404,7 @@ class RequestHandler(BaseHTTPRequestHandler):
 
         start_idx = -1
         for i in range(marker_idx - 1, -1, -1):
-            if lines[i].strip().startswith("⏺"):
+            if is_assistant_line(lines[i]):
                 start_idx = i
                 break
             if lines[i].strip().startswith("❯"):
@@ -402,9 +415,8 @@ class RequestHandler(BaseHTTPRequestHandler):
         reply_lines: list[str] = []
         for i in range(start_idx, marker_idx):
             line = lines[i].rstrip()
-            stripped = line.strip()
-            if stripped.startswith("⏺"):
-                line = line.replace("⏺", "", 1).lstrip()
+            if is_assistant_line(line):
+                line = strip_assistant_prefix(line)
             reply_lines.append(line)
 
         while reply_lines and not reply_lines[0].strip():
