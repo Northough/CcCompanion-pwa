@@ -1,8 +1,8 @@
-import { IconClose, IconPlus, IconChat, IconChart, IconCog, IconTerminal, IconBrain } from './Icons';
+import { IconClose, IconPlus, IconChat, IconChart, IconCog, IconTerminal, IconBrain, IconUsers } from './Icons';
 import { IconButton } from './Shell';
 import { apiPost } from './api';
 
-type Page = 'chat' | 'terminal' | 'usage' | 'settings' | 'memory';
+type Page = 'chat' | 'terminal' | 'usage' | 'settings' | 'memory' | 'group';
 
 export function Sidebar({ open, onClose, page, goto, showToast }: { open: boolean; onClose: () => void; page: Page; goto: (p: Page) => void; showToast?: (m: string, t?: string) => void }) {
   const newChat = async () => {
@@ -29,6 +29,7 @@ export function Sidebar({ open, onClose, page, goto, showToast }: { open: boolea
           <button className={`drawer-item${page === 'chat' ? ' active' : ''}`} onClick={() => nav('chat')}><IconChat size={20} /><span>Chat</span></button>
           <button className={`drawer-item${page === 'terminal' ? ' active' : ''}`} onClick={() => nav('terminal')}><IconTerminal size={20} /><span>Terminal</span></button>
           <button className={`drawer-item${page === 'memory' ? ' active' : ''}`} onClick={() => nav('memory')}><IconBrain size={20} /><span>Memory</span></button>
+          <button className={`drawer-item${page === 'group' ? ' active' : ''}`} onClick={() => nav('group')}><IconUsers size={20} /><span>群聊</span></button>
           <button className={`drawer-item${page === 'usage' ? ' active' : ''}`} onClick={() => nav('usage')}><IconChart size={20} /><span>Usage</span></button>
           <button className={`drawer-item${page === 'settings' ? ' active' : ''}`} onClick={() => nav('settings')}><IconCog size={20} /><span>Settings</span></button>
         </nav>

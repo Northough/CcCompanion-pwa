@@ -4,11 +4,12 @@ import TerminalView from './TerminalView';
 import UsageView from './UsageView';
 import SettingsView from './SettingsView';
 import MemoryView from './MemoryView';
+import GroupView from './GroupView';
 import { Sidebar } from './Sidebar';
 import { NavHandle, Toast } from './Shell';
 import './App.css';
 
-type Page = 'chat' | 'terminal' | 'usage' | 'settings' | 'memory';
+type Page = 'chat' | 'terminal' | 'usage' | 'settings' | 'memory' | 'group';
 
 function App() {
   const [page, setPage] = useState<Page>('chat');
@@ -29,6 +30,7 @@ function App() {
       {page === 'memory' && <MemoryView openSidebar={() => setSidebarOpen(true)} showToast={showToast} />}
       {page === 'usage' && <UsageView openSidebar={() => setSidebarOpen(true)} showToast={showToast} />}
       {page === 'settings' && <SettingsView openSidebar={() => setSidebarOpen(true)} showToast={showToast} />}
+      {page === 'group' && <GroupView openSidebar={() => setSidebarOpen(true)} showToast={showToast} />}
 
       <NavHandle />
 

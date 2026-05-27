@@ -27,6 +27,7 @@ from favorites import Favorites
 from settings import Settings
 from usage import UsageReader
 from memory_store import MemoryStore
+from group_chat import GroupChatStore
 
 HERE = Path(__file__).resolve().parent
 DEFAULT_CONFIG = HERE / "config.toml"
@@ -120,6 +121,8 @@ class ServerState:
 
         self.attachments_dir = data_dir / "attachments"
         self.attachments_dir.mkdir(parents=True, exist_ok=True)
+
+        self.group = GroupChatStore(data_dir)
 
         tmux_cfg = config.get("tmux", {})
         self.default_session: str = tmux_cfg.get("session", "cc")
@@ -259,6 +262,14 @@ class RequestHandler(BaseHTTPRequestHandler):
             self._send_json(200, {"ok": True, "pending": self.state.memory.list_pending()})
             return
 
+        # ── Group chat GET ──
+        if path == "/group/roster":
+            self._handle_group_roster()
+            return
+        if path.startswith("/group/poll"):
+            self._handle_group_poll()
+            return
+
         self._send_json(404, {"error": "not found"})
 
     # ---- POST routes ----
@@ -316,6 +327,13 @@ class RequestHandler(BaseHTTPRequestHandler):
         elif path == "/memory/reindex":
             n = self.state.memory.reindex()
             self._send_json(200, {"ok": True, "indexed": n})
+        # ── Group chat POST ──
+        elif path == "/group/send":
+            self._handle_group_send(body)
+        elif path == "/group/typing":
+            self._handle_group_typing(body)
+        elif path == "/group/roster_heartbeat":
+            self._handle_group_heartbeat(body)
         else:
             self._send_json(404, {"error": "not found"})
 
@@ -719,6 +737,59 @@ class RequestHandler(BaseHTTPRequestHandler):
             return
         ok = self.state.memory.reject_pending(id)
         self._send_json(200 if ok else 404, {"ok": ok})
+
+    # ---- Group chat handlers ----
+
+    def _handle_group_roster(self):
+        roster = self.state.group.get_roster()
+        presence = self.state.group.get_presence()
+        self._send_json(200, {"ok": True, "roster": roster, **presence})
+
+    def _handle_group_poll(self):
+        qs = parse_qs(urlparse(self.path).query)
+        since = qs.get("since", [None])[0]
+        try:
+            limit = int(qs.get("limit", ["200"])[0])
+        except Exception:
+            limit = 200
+        limit = min(max(limit, 1), 5000)
+        viewer_id = qs.get("sender_id", [None])[0]
+        if viewer_id:
+            self.state.group.heartbeat(viewer_id)
+        records = self.state.group.poll(since_ts=since, limit=limit)
+        self._send_json(200, {"ok": True, "records": records, "count": len(records)})
+
+    def _handle_group_send(self, body: dict[str, Any]):
+        sender_id = body.get("sender_id", "user").strip()
+        text = body.get("text", "").strip()
+        if not text:
+            self._send_json(400, {"error": "text required"})
+            return
+        mentions = body.get("mentions") or []
+        message_type = body.get("message_type", "chat")
+        task_id = body.get("task_id") or None
+        delivery_targets = body.get("delivery_targets") or None
+
+        rec = self.state.group.send(
+            sender_id,
+            text,
+            mentions=mentions,
+            message_type=message_type,
+            task_id=task_id,
+            delivery_targets=delivery_targets,
+        )
+        self._send_json(200, {"ok": True, "record": rec})
+
+    def _handle_group_typing(self, body: dict[str, Any]):
+        sender_id = body.get("sender_id", "user").strip()
+        typing = bool(body.get("typing", True))
+        self.state.group.set_typing(sender_id, typing)
+        self._send_json(200, {"ok": True})
+
+    def _handle_group_heartbeat(self, body: dict[str, Any]):
+        sender_id = body.get("sender_id", "user").strip()
+        self.state.group.heartbeat(sender_id)
+        self._send_json(200, {"ok": True})
 
     def _handle_diag(self):
         import time as _time

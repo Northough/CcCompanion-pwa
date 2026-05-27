@@ -23,6 +23,7 @@ This project is for remotely controlling an existing local Claude Code session f
 - Local JSONL chat history, favorites, and memory store
 - Optional memory injection
 - Basic usage panel with `ccusage` and Claude Code statusLine support
+- **工作群 (Group Chat)** — multi-member message bus with roster, @mentions, typing/online presence, and task message types. See [docs/GROUP_CHAT.md](docs/GROUP_CHAT.md) for details.
 - Setup skill for guided local/LAN/Tailscale deployment
 
 ## Project Layout

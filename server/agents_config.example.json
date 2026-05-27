@@ -1,0 +1,40 @@
+{
+  "roster": [
+    {
+      "id": "user",
+      "name": "User",
+      "display_name": "User",
+      "kind": "human",
+      "color": "#B85C2E",
+      "can_reply": false
+    },
+    {
+      "id": "assistant",
+      "name": "Assistant",
+      "display_name": "Assistant",
+      "kind": "agent",
+      "color": "#4F7B4A",
+      "model": "Claude",
+      "can_reply": true,
+      "default_responder": true
+    },
+    {
+      "id": "coder",
+      "name": "Coder",
+      "display_name": "Coder",
+      "kind": "agent",
+      "color": "#3A6FA0",
+      "model": "Claude",
+      "can_reply": true
+    },
+    {
+      "id": "reviewer",
+      "name": "Reviewer",
+      "display_name": "Reviewer",
+      "kind": "agent",
+      "color": "#8B5CF6",
+      "model": "Codex",
+      "can_reply": true
+    }
+  ]
+}

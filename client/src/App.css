@@ -98,6 +98,38 @@
 /* Skeleton */
 .skeleton { height: 14px; background: var(--bg-2); border-radius: 8px; opacity: 0.5; }
 
+/* Group roster bar */
+.group-roster-bar {
+  display: flex;
+  gap: 10px;
+  padding: 8px 18px;
+  overflow-x: auto;
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--line);
+  -webkit-overflow-scrolling: touch;
+}
+.group-roster-chip {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 4px 10px 4px 8px;
+  flex-shrink: 0;
+  font-size: 12px;
+  font-weight: 600;
+}
+.group-roster-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.group-roster-name {
+  letter-spacing: 0.02em;
+}
+
 /* Slash command popup */
 .cmd-popup {
   background: var(--surface-2);
