@@ -15,6 +15,7 @@ type Page = 'chat' | 'terminal' | 'usage' | 'settings' | 'memory' | 'group' | 's
 function App() {
   const [page, setPage] = useState<Page>('chat');
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [chatReloadKey, setChatReloadKey] = useState(0);
   const [toast, setToast] = useState({ message: '', tone: '', key: 0 });
 
   const showToast = useCallback((message: string, tone = '') => {
@@ -23,20 +24,27 @@ function App() {
   }, []);
 
   const goto = useCallback((p: Page) => { setPage(p); setSidebarOpen(false); }, []);
+  const refreshChat = useCallback(() => setChatReloadKey(k => k + 1), []);
+  const pageView = (() => {
+    switch (page) {
+      case 'chat': return <ChatView key={chatReloadKey} openSidebar={() => setSidebarOpen(true)} showToast={showToast} />;
+      case 'terminal': return <TerminalView openSidebar={() => setSidebarOpen(true)} />;
+      case 'study': return <StudyView openSidebar={() => setSidebarOpen(true)} showToast={showToast} />;
+      case 'memory': return <MemoryView openSidebar={() => setSidebarOpen(true)} showToast={showToast} />;
+      case 'usage': return <UsageView openSidebar={() => setSidebarOpen(true)} showToast={showToast} />;
+      case 'settings': return <SettingsView openSidebar={() => setSidebarOpen(true)} showToast={showToast} />;
+      case 'group': return <GroupView openSidebar={() => setSidebarOpen(true)} showToast={showToast} />;
+      default: return null;
+    }
+  })();
 
   return (
     <div className="device">
-      {page === 'chat' && <ChatView openSidebar={() => setSidebarOpen(true)} showToast={showToast} />}
-      {page === 'terminal' && <TerminalView openSidebar={() => setSidebarOpen(true)} />}
-      {page === 'study' && <StudyView openSidebar={() => setSidebarOpen(true)} showToast={showToast} />}
-      {page === 'memory' && <MemoryView openSidebar={() => setSidebarOpen(true)} showToast={showToast} />}
-      {page === 'usage' && <UsageView openSidebar={() => setSidebarOpen(true)} showToast={showToast} />}
-      {page === 'settings' && <SettingsView openSidebar={() => setSidebarOpen(true)} showToast={showToast} />}
-      {page === 'group' && <GroupView openSidebar={() => setSidebarOpen(true)} showToast={showToast} />}
+      <div className="page-shell">{pageView}</div>
 
       <NavHandle />
 
-      <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} page={page} goto={goto} showToast={showToast} />
+      <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} page={page} goto={goto} showToast={showToast} onChatChanged={refreshChat} />
 
       <Toast key={toast.key} message={toast.message} tone={toast.tone} />
     </div>

@@ -12,11 +12,11 @@ function fmtTime(iso: string) {
 
 function TypeTag({ type }: { type: string }) {
   const p: Record<string, { bg: string; fg: string; label: string }> = {
-    preference: { bg: 'rgba(184,92,46,0.10)', fg: 'var(--accent)', label: '偏好' },
-    project: { bg: 'rgba(92,122,168,0.10)', fg: '#3B5980', label: '项目' },
-    relation: { bg: 'rgba(126,154,92,0.10)', fg: '#5A7440', label: '关系' },
-    state: { bg: 'rgba(176,122,30,0.10)', fg: '#8A5E14', label: '状态' },
-    instruction: { bg: 'rgba(27,24,20,0.06)', fg: 'var(--ink-2)', label: '指令' },
+    preference: { bg: 'rgba(217,70,131,0.12)', fg: 'var(--accent)', label: '偏好' },
+    project: { bg: 'rgba(139,111,209,0.12)', fg: 'var(--study)', label: '项目' },
+    relation: { bg: 'rgba(76,154,120,0.12)', fg: 'var(--good)', label: '关系' },
+    state: { bg: 'rgba(217,139,43,0.13)', fg: 'var(--reward)', label: '状态' },
+    instruction: { bg: 'rgba(88,38,58,0.07)', fg: 'var(--ink-2)', label: '指令' },
   };
   const c = p[type] || p.instruction;
   return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, background: c.bg, color: c.fg, padding: '3px 9px', borderRadius: 999, fontSize: 11, fontWeight: 700, letterSpacing: '0.02em' }}>{c.label}</span>;
@@ -76,8 +76,8 @@ function MemoryCard({ m, onExpire, onDelete }: { m: any; onExpire: () => void; o
 function PendingSheet({ open, onClose, items, onAccept, onReject }: { open: boolean; onClose: () => void; items: any[]; onAccept: (id: string) => void; onReject: (id: string) => void }) {
   if (!open) return null;
   return (
-    <div style={{ position: 'absolute', inset: 0, zIndex: 60, background: 'rgba(20,16,12,0.36)', display: 'flex', alignItems: 'flex-end' }} onClick={onClose}>
-      <div onClick={e => e.stopPropagation()} style={{ width: '100%', maxHeight: '88%', background: 'var(--bg)', borderRadius: '24px 24px 0 0', boxShadow: '0 -20px 60px rgba(0,0,0,0.3)', display: 'flex', flexDirection: 'column', overflow: 'hidden', animation: 'sheetIn 0.26s cubic-bezier(0.2,0.8,0.2,1)' }}>
+    <div style={{ position: 'absolute', inset: 0, zIndex: 60, background: 'rgba(54,24,38,0.34)', display: 'flex', alignItems: 'flex-end' }} onClick={onClose}>
+      <div onClick={e => e.stopPropagation()} style={{ width: '100%', maxHeight: '88%', background: 'var(--bg)', borderRadius: '24px 24px 0 0', boxShadow: '0 -20px 60px rgba(88,38,58,0.24)', display: 'flex', flexDirection: 'column', overflow: 'hidden', animation: 'sheetIn 0.26s cubic-bezier(0.2,0.8,0.2,1)' }}>
         <div style={{ display: 'flex', justifyContent: 'center', padding: '10px 0 4px' }}><div style={{ width: 40, height: 4, borderRadius: 2, background: 'var(--line-2)' }} /></div>
         <div style={{ padding: '8px 22px 6px' }}>
           <h3 style={{ margin: 0, fontSize: 18, fontWeight: 700 }}>待确认记忆</h3>
@@ -113,8 +113,8 @@ function CreateSheet({ open, onClose, onCreate }: { open: boolean; onClose: () =
     try { const d = await apiPost('/memory/create', { type, content: content.trim(), evidence: '手动添加', confidence: 1 }); if (d.ok) { onCreate(d.memory); onClose(); setContent(''); } } catch (e) { alert(`创建失败: ${e}`); }
   };
   return (
-    <div style={{ position: 'absolute', inset: 0, zIndex: 60, background: 'rgba(20,16,12,0.36)', display: 'flex', alignItems: 'flex-end' }} onClick={onClose}>
-      <div onClick={e => e.stopPropagation()} style={{ width: '100%', maxHeight: '88%', background: 'var(--bg)', borderRadius: '24px 24px 0 0', boxShadow: '0 -20px 60px rgba(0,0,0,0.3)', display: 'flex', flexDirection: 'column', overflow: 'hidden', animation: 'sheetIn 0.26s cubic-bezier(0.2,0.8,0.2,1)' }}>
+    <div style={{ position: 'absolute', inset: 0, zIndex: 60, background: 'rgba(54,24,38,0.34)', display: 'flex', alignItems: 'flex-end' }} onClick={onClose}>
+      <div onClick={e => e.stopPropagation()} style={{ width: '100%', maxHeight: '88%', background: 'var(--bg)', borderRadius: '24px 24px 0 0', boxShadow: '0 -20px 60px rgba(88,38,58,0.24)', display: 'flex', flexDirection: 'column', overflow: 'hidden', animation: 'sheetIn 0.26s cubic-bezier(0.2,0.8,0.2,1)' }}>
         <div style={{ display: 'flex', justifyContent: 'center', padding: '10px 0 4px' }}><div style={{ width: 40, height: 4, borderRadius: 2, background: 'var(--line-2)' }} /></div>
         <div style={{ padding: '8px 22px 6px' }}><h3 style={{ margin: 0, fontSize: 18, fontWeight: 700 }}>新增记忆</h3></div>
         <div style={{ padding: '14px 22px 6px' }}>

@@ -11,3 +11,16 @@ data_dir = "./data"
 [tmux]
 session = "cc"
 # bus_hook_path = "/absolute/path/to/server/bus_stop_hook.py"
+
+[group_bridge]
+# Poll Group for agent-targeted messages. Claude-like agents are delivered to tmux.
+# Codex-like app_server agents are consumed automatically through local Codex exec.
+enabled = true
+interval_seconds = 2
+
+# Optional Codex bridge tuning. Leave codex_model empty to use your Codex default.
+codex_command = "codex"
+codex_model = ""
+codex_timeout_seconds = 180
+# codex_workdir = "/absolute/path/to/CcCompanion-pwa"
+# codex_extra_args = ["--ignore-rules"]

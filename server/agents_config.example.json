@@ -5,7 +5,7 @@
       "name": "User",
       "display_name": "User",
       "kind": "human",
-      "color": "#B85C2E",
+      "color": "#D94683",
       "can_reply": false
     },
     {
@@ -13,8 +13,10 @@
       "name": "Assistant",
       "display_name": "Assistant",
       "kind": "agent",
-      "color": "#4F7B4A",
+      "color": "#E779A8",
       "model": "Claude",
+      "bridge": "tmux",
+      "tmux_session": "cc",
       "can_reply": true,
       "default_responder": true
     },
@@ -23,8 +25,10 @@
       "name": "Coder",
       "display_name": "Coder",
       "kind": "agent",
-      "color": "#3A6FA0",
+      "color": "#8B6FD1",
       "model": "Claude",
+      "bridge": "tmux",
+      "tmux_session": "cc",
       "can_reply": true
     },
     {
@@ -32,8 +36,9 @@
       "name": "Reviewer",
       "display_name": "Reviewer",
       "kind": "agent",
-      "color": "#8B5CF6",
+      "color": "#4C9A78",
       "model": "Codex",
+      "bridge": "app_server",
       "can_reply": true
     }
   ]

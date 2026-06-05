@@ -23,7 +23,7 @@ This project is for remotely controlling an existing local Claude Code session f
 - Local JSONL chat history, favorites, and memory store
 - Optional memory injection
 - Basic usage panel with `ccusage` and Claude Code statusLine support
-- **工作群 (Group Chat)** — multi-member message bus with roster, @mentions, typing/online presence, and task message types. See [docs/GROUP_CHAT.md](docs/GROUP_CHAT.md) for details.
+- **Group** — multi-member message bus with roster, @mentions, typing/online presence, task messages, Claude/tmux delivery, and Codex app-server inbox/reply endpoints. See [docs/GROUP_CHAT.md](docs/GROUP_CHAT.md) for details.
 - **Study dashboard + MCP tools** — local learning sources, SQLite FTS5 search, points, AI-created tasks, rewards, penalties, inventory, and mystery items. Claude Code manages sources/tasks through the `cccompanion-study` MCP server; the main chat stays clean when you are not studying. See [docs/STUDY_MCP.md](docs/STUDY_MCP.md).
 - Setup skill for guided local/LAN/Tailscale deployment
 

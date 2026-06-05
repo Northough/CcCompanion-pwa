@@ -6,35 +6,38 @@ Group Chat is a lightweight message bus for multi-member coordination within CcC
 
 - A **message bus** — messages are stored in JSONL and broadcast via polling.
 - Supports **roster** (member list), **@mentions**, **typing/online presence**, and **task-type messages**.
-- Designed for future multi-agent coordination (e.g., assistant, coder, reviewer) but does **not** automatically control tmux sessions or spawn agents. That orchestration is left to external tooling.
+- Includes a small **agent bridge**: Claude-like members are delivered through tmux, while Codex-like `app_server` members are consumed automatically through local Codex exec and can also use inbox/reply endpoints.
 
 ## Architecture
 
 ```
 PWA (GroupView)  ──poll/post──▶  server.py  ──read/write──▶  group_messages.jsonl
-                                           ──read/write──▶  group_state.json
+                                           ├─read/write──▶  group_state.json
+                                           ├─tmux bridge─▶  Claude Code session
+                                           └─Codex bridge▶  codex exec / agent API
 ```
 
 There is no push mechanism; clients poll every 2 seconds for new messages.
+The agent bridge also polls every ~2 seconds for new Group messages targeted at tmux-backed or Codex-backed agents.
 
 ## Default Roster
 
 | ID          | Name      | Color   |
 |-------------|-----------|---------|
-| `user`      | User      | `#B85C2E` |
-| `assistant` | Assistant | `#4F7B4A` |
-| `coder`     | Coder     | `#3A6FA0` |
-| `reviewer`  | Reviewer  | `#8B5CF6` |
+| `user`      | User      | `#D94683` |
+| `assistant` | Assistant | `#E779A8` |
+| `coder`     | Coder     | `#8B6FD1` |
+| `reviewer`  | Reviewer  | `#4C9A78` |
 
 Override the roster by placing `server/agents_config.json` next to `config.toml`:
 
 ```json
 {
   "roster": [
-    { "id": "user",      "name": "User",      "color": "#B85C2E" },
-    { "id": "assistant", "name": "Assistant",  "color": "#4F7B4A" },
-    { "id": "coder",     "name": "Coder",      "color": "#3A6FA0" },
-    { "id": "reviewer",  "name": "Reviewer",   "color": "#8B5CF6" }
+    { "id": "user",      "name": "User",      "color": "#D94683" },
+    { "id": "assistant", "name": "Assistant",  "color": "#E779A8", "model": "Claude", "bridge": "tmux", "tmux_session": "cc", "default_responder": true, "can_reply": true },
+    { "id": "coder",     "name": "Coder",      "color": "#8B6FD1", "model": "Claude", "bridge": "tmux", "tmux_session": "cc", "can_reply": true },
+    { "id": "reviewer",  "name": "Reviewer",   "color": "#4C9A78", "model": "Codex", "bridge": "app_server", "can_reply": true }
   ]
 }
 ```
@@ -115,6 +118,62 @@ Poll for new messages. Returns messages whose `ts` is strictly after `since`.
 
 Marks the sender as online and clears their typing state.
 
+### `GET /group/agent/status`
+
+Returns bridge status, agent bridge types, cursors, busy state, and tmux session mapping.
+
+```json
+{
+  "ok": true,
+  "enabled": true,
+  "started": true,
+  "agents": [
+    { "id": "assistant", "bridge": "tmux", "tmux_session": "cc", "busy": false },
+    { "id": "reviewer", "bridge": "app_server", "busy": false }
+  ]
+}
+```
+
+### `GET /group/agent/inbox?agent_id=&since=&limit=&mark_seen=`
+
+Codex/app-server agents poll this endpoint for messages targeted at them. The built-in Codex bridge also uses this targeting logic before posting replies back to Group.
+
+- Explicit `@reviewer`, `mentions`, or `delivery_targets` target that agent.
+- Unmentioned user messages target only the roster member with `default_responder: true`.
+- Agent messages with no mentions are ignored by other agents to prevent reply loops.
+- `mark_seen=1` advances that agent's stored cursor to the last returned message.
+
+```json
+{
+  "ok": true,
+  "agent_id": "reviewer",
+  "records": [
+    { "sender_id": "assistant", "text": "@reviewer can you check this?", "mentions": ["reviewer"] }
+  ],
+  "cursor": "2026-06-05T12:00:00.123+08:00"
+}
+```
+
+### `POST /group/agent/reply`
+
+Codex/app-server agents post their reply back to Group.
+
+```json
+{
+  "agent_id": "reviewer",
+  "text": "@assistant I found the issue.",
+  "ack_ts": "2026-06-05T12:00:00.123+08:00"
+}
+```
+
+### `POST /group/agent/ack`
+
+Advance an agent cursor without sending a reply.
+
+```json
+{ "agent_id": "reviewer", "ts": "2026-06-05T12:00:00.123+08:00" }
+```
+
 ## Data Storage
 
 - `server/data/group_messages.jsonl` — append-only message log
@@ -124,10 +183,11 @@ Both are created automatically in the configured `data_dir`.
 
 ## Important Limitations
 
-1. **No automatic agent orchestration.** This version is purely a message bus. It does not spawn tmux sessions, run Claude instances, or dispatch tasks to agents.
-2. **No push notifications.** Clients poll every ~2 seconds. There is no WebSocket or SSE layer.
-3. **No APNs / Bark / iOS push.** This is a pure PWA + Python stdlib stack.
-4. **No Agent SDK.** The group chat is decoupled from Claude Code's interactive CLI.
+1. **Claude replies depend on tmux screen capture.** The bridge injects messages into the configured tmux session and captures the next stable Claude Code reply.
+2. **Codex uses local Codex exec by default.** `app_server` roster members are consumed by the Python bridge through `codex exec` with read-only sandboxing; the inbox/reply endpoints remain available for a future persistent app-server adapter.
+3. **No push notifications.** Clients and bridges poll every ~2 seconds. There is no WebSocket or SSE layer.
+4. **No APNs / Bark / iOS push.** This is a pure PWA + Python stdlib stack.
+5. **No Agent SDK.** Claude Code stays on the interactive tmux path.
 
 ## Smoke Test
 

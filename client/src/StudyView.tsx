@@ -80,6 +80,9 @@ export default function StudyView({ openSidebar, showToast }: { openSidebar: () 
   const [answers, setAnswers] = useState<Record<string, string>>({});
 
   const pendingTasks = useMemo(() => game.tasks.filter(t => t.status === 'pending'), [game.tasks]);
+  const completionLabel = status.source_count
+    ? `${status.completed_count}/${status.source_count} 章节`
+    : '0/0 章节';
 
   const load = useCallback(async () => {
     try {
@@ -163,6 +166,20 @@ export default function StudyView({ openSidebar, showToast }: { openSidebar: () 
       <TopBar left={<IconButton onClick={openSidebar}><IconMenu /></IconButton>} center={<span className="topbar-title">Study</span>} right={<IconDatabase size={20} />} />
 
       <div className="study-scroll">
+        <section className="study-hero">
+          <div className="study-hero-copy">
+            <span className="study-kicker">cccompanion-study</span>
+            <div className="study-hero-title">{game.points} 积分</div>
+            <div className="study-hero-sub">
+              {pendingTasks.length > 0 ? `${pendingTasks.length} 个任务待完成` : '暂无待完成任务'}
+            </div>
+          </div>
+          <div className="study-hero-meter">
+            <span>{completionLabel}</span>
+            <small>完成</small>
+          </div>
+        </section>
+
         <div className="study-stats">
           <div className="study-stat accent"><span>{game.points}</span><label>积分</label></div>
           <div className="study-stat"><span>{status.source_count}</span><label>资料</label></div>
@@ -171,34 +188,8 @@ export default function StudyView({ openSidebar, showToast }: { openSidebar: () 
         </div>
 
         <section className="study-panel">
-          <div className="study-panel-head"><IconStar size={18} /><span>积分与道具</span></div>
-          <div className="study-effects">
-            {Object.keys(game.active_effects || {}).length === 0 && <span>没有生效中的道具</span>}
-            {Boolean(game.active_effects.double) && <b>双倍积分</b>}
-            {Boolean(game.active_effects.shield) && <b>护盾</b>}
-            {Boolean(game.active_effects.skip) && <b>免罚券</b>}
-          </div>
-          <div className="study-inventory">
-            {game.inventory.length === 0 && <span className="study-muted">背包是空的</span>}
-            {game.inventory.map((item, idx) => (
-              <button key={`${item.id}-${idx}-${item.acquired_at}`} className="study-chip" onClick={() => useItem(item)}>{item.name}</button>
-            ))}
-          </div>
-          <div className="study-shop-grid">
-            {game.shop.map(item => (
-              <button key={item.id} className="study-shop-item" onClick={() => buyItem(item)} disabled={game.points < item.price}>
-                <span>{item.name}</span>
-                <small>{item.desc}</small>
-                <b>{item.price} 分</b>
-              </button>
-            ))}
-          </div>
-        </section>
-
-        <section className="study-panel">
           <div className="study-panel-head"><IconClock size={18} /><span>任务与惩罚</span></div>
-          <div className="study-empty">任务由 AI 发布，提交后也由 AI 判定</div>
-          {pendingTasks.length === 0 && <div className="study-empty">暂时没有待完成任务，在主聊天里让 Claude 给你发挑战</div>}
+          {pendingTasks.length === 0 && <div className="study-empty compact">暂无待完成任务</div>}
           {pendingTasks.map(task => (
             <div className="study-task" key={task.id}>
               <div className="study-task-body">
@@ -226,6 +217,31 @@ export default function StudyView({ openSidebar, showToast }: { openSidebar: () 
         </section>
 
         <section className="study-panel">
+          <div className="study-panel-head"><IconStar size={18} /><span>积分与道具</span></div>
+          <div className="study-effects">
+            {Object.keys(game.active_effects || {}).length === 0 && <span>没有生效中的道具</span>}
+            {Boolean(game.active_effects.double) && <b>双倍积分</b>}
+            {Boolean(game.active_effects.shield) && <b>护盾</b>}
+            {Boolean(game.active_effects.skip) && <b>免罚券</b>}
+          </div>
+          <div className="study-inventory">
+            {game.inventory.length === 0 && <span className="study-muted">背包是空的</span>}
+            {game.inventory.map((item, idx) => (
+              <button key={`${item.id}-${idx}-${item.acquired_at}`} className="study-chip" onClick={() => useItem(item)}>{item.name}</button>
+            ))}
+          </div>
+          <div className="study-shop-grid">
+            {game.shop.map(item => (
+              <button key={item.id} className="study-shop-item" onClick={() => buyItem(item)} disabled={game.points < item.price}>
+                <span>{item.name}</span>
+                <small>{item.desc}</small>
+                <b>{item.price} 分</b>
+              </button>
+            ))}
+          </div>
+        </section>
+
+        <section className="study-panel">
           <div className="study-panel-head"><IconSearch size={18} /><span>搜索知识库</span></div>
           <div className="study-search-row">
             <input className="study-input" value={query} onChange={e => setQuery(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') search(); }} placeholder="搜索资料片段" />
@@ -241,7 +257,7 @@ export default function StudyView({ openSidebar, showToast }: { openSidebar: () 
 
         <section className="study-panel">
           <div className="study-panel-head"><IconFile size={18} /><span>资料列表</span></div>
-          {sources.length === 0 && <div className="study-empty">还没有资料</div>}
+          {sources.length === 0 && <div className="study-empty compact">还没有资料</div>}
           {sources.map(source => (
             <div className={`study-source${source.completed ? ' done' : ''}${selectedId === source.id ? ' selected' : ''}`} key={source.id}>
               <button className="study-source-main" onClick={() => setSelectedId(source.id)}>
@@ -253,7 +269,7 @@ export default function StudyView({ openSidebar, showToast }: { openSidebar: () 
           ))}
         </section>
 
-        <div className="study-bottom-note"><IconBolt size={14} />聊天页也会自动检索这些资料</div>
+        <div className="study-bottom-note"><IconBolt size={14} />cccompanion-study</div>
       </div>
     </>
   );

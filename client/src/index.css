@@ -1,29 +1,33 @@
 @import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap');
 
 :root {
-  --bg: #F1ECE2;
-  --bg-2: #EBE4D6;
-  --surface: #FBF8F1;
+  --bg: #FFF4F8;
+  --bg-2: #FBE5EE;
+  --surface: #FFF9FC;
   --surface-2: #FFFFFF;
-  --ink: #1B1814;
-  --ink-2: #3A342D;
-  --muted: #6E665B;
-  --dim: #9B9387;
-  --line: #E3DCCB;
-  --line-2: #D8CFBA;
-  --accent: #B85C2E;
-  --accent-2: #C97849;
-  --accent-soft: #ECD8C2;
-  --accent-tint: #F7EBDD;
-  --user-bubble: #EFE6D3;
-  --good: #4F7B4A;
-  --warn: #B07A1E;
-  --bad: #B14A3A;
+  --ink: #2E2028;
+  --ink-2: #4C3541;
+  --muted: #7B5D6A;
+  --dim: #B08C9B;
+  --line: #F0CAD8;
+  --line-2: #E5ADC2;
+  --accent: #D94683;
+  --accent-2: #8B6FD1;
+  --accent-soft: #F7B8CF;
+  --accent-tint: #FDEBF2;
+  --reward: #D98B2B;
+  --reward-tint: #FFF0C8;
+  --study: #7B61C9;
+  --study-tint: #F0EAFF;
+  --user-bubble: #FFE4EF;
+  --good: #4C9A78;
+  --warn: #C47B19;
+  --bad: #D94A62;
   --radius-card: 24px;
   --radius-input: 28px;
   --radius-pill: 999px;
-  --shadow-sm: 0 1px 2px rgba(27,24,20,0.04);
-  --shadow-md: 0 6px 22px rgba(27,24,20,0.08), 0 1px 3px rgba(27,24,20,0.05);
+  --shadow-sm: 0 1px 2px rgba(88,38,58,0.06);
+  --shadow-md: 0 10px 28px rgba(179,74,114,0.11), 0 1px 3px rgba(88,38,58,0.06);
   --font-ui: 'Manrope', system-ui, -apple-system, 'Segoe UI', sans-serif;
   --font-mono: 'JetBrains Mono', ui-monospace, Menlo, monospace;
   font-family: var(--font-ui);
@@ -54,7 +58,7 @@ button { font-family: inherit; cursor: pointer; }
 .md p:last-child { margin-bottom: 0; }
 .md strong { font-weight: 700; }
 .md code { font-family: var(--font-mono); font-size: 13px; background: var(--accent-tint); padding: 1px 5px; border-radius: 5px; }
-.md pre { background: #1B1814; color: #EFE6D3; border-radius: 12px; padding: 12px; overflow-x: auto; margin: 8px 0; }
+.md pre { background: #2A1722; color: #FFEAF2; border-radius: 12px; padding: 12px; overflow-x: auto; margin: 8px 0; }
 .md pre code { background: none; padding: 0; color: inherit; }
 .md ul, .md ol { margin: 0 0 12px; padding-left: 20px; }
 .md li { margin: 3px 0; }
@@ -63,4 +67,4 @@ button { font-family: inherit; cursor: pointer; }
   word-break: break-word;
 }
 
-.codeblock { background: #1B1814; color: #EFE6D3; border-radius: 12px; padding: 12px 14px; font-family: var(--font-mono); font-size: 12.5px; line-height: 1.5; overflow-x: auto; margin: 6px 0 12px; white-space: pre; }
+.codeblock { background: #2A1722; color: #FFEAF2; border-radius: 12px; padding: 12px 14px; font-family: var(--font-mono); font-size: 12.5px; line-height: 1.5; overflow-x: auto; margin: 6px 0 12px; white-space: pre; }

@@ -21,10 +21,10 @@ logger = logging.getLogger("cc-server.group_chat")
 
 # ── Default roster ──────────────────────────────────────────────────────
 DEFAULT_ROSTER: list[dict[str, Any]] = [
-    {"id": "user", "name": "User", "display_name": "User", "kind": "human", "color": "#B85C2E", "can_reply": False},
-    {"id": "assistant", "name": "Assistant", "display_name": "Assistant", "kind": "agent", "color": "#4F7B4A", "model": "Claude", "can_reply": True, "default_responder": True},
-    {"id": "coder", "name": "Coder", "display_name": "Coder", "kind": "agent", "color": "#3A6FA0", "model": "Claude", "can_reply": True},
-    {"id": "reviewer", "name": "Reviewer", "display_name": "Reviewer", "kind": "agent", "color": "#8B5CF6", "model": "Codex", "can_reply": True},
+    {"id": "user", "name": "User", "display_name": "User", "kind": "human", "color": "#D94683", "can_reply": False},
+    {"id": "assistant", "name": "Assistant", "display_name": "Assistant", "kind": "agent", "color": "#E779A8", "model": "Claude", "can_reply": True, "default_responder": True},
+    {"id": "coder", "name": "Coder", "display_name": "Coder", "kind": "agent", "color": "#8B6FD1", "model": "Claude", "can_reply": True},
+    {"id": "reviewer", "name": "Reviewer", "display_name": "Reviewer", "kind": "agent", "color": "#4C9A78", "model": "Codex", "can_reply": True},
 ]
 
 _AGENTS_CONFIG_NAME = "agents_config.json"
@@ -54,6 +54,20 @@ def _load_roster(data_dir: Path) -> list[dict[str, Any]]:
     return [dict(m) for m in DEFAULT_ROSTER]
 
 
+def _apply_member_overrides(roster: list[dict[str, Any]], overrides: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
+    allowed = {"name", "display_name", "color"}
+    out: list[dict[str, Any]] = []
+    for member in roster:
+        merged = dict(member)
+        patch = overrides.get(str(member.get("id"))) or {}
+        for key in allowed:
+            value = patch.get(key)
+            if isinstance(value, str) and value.strip():
+                merged[key] = value.strip()
+        out.append(_normalize_member(merged))
+    return out
+
+
 class GroupChatStore:
     """Append-only group chat message bus with roster + presence."""
 
@@ -67,7 +81,8 @@ class GroupChatStore:
 
         # Load or initialise state
         self._state: dict[str, Any] = self._load_state()
-        self._state["roster"] = _load_roster(self._data_dir)
+        self._state.setdefault("member_overrides", {})
+        self._state["roster"] = _apply_member_overrides(_load_roster(self._data_dir), self._state["member_overrides"])
         self._state.setdefault("online", {})       # sender_id -> last heartbeat iso
         self._state.setdefault("typing", {})        # sender_id -> last typing iso
         self._save_state()
@@ -97,12 +112,47 @@ class GroupChatStore:
         with self._lock:
             return [dict(m) for m in self._state.get("roster", DEFAULT_ROSTER)]
 
+    def get_member(self, member_id: str) -> dict[str, Any] | None:
+        with self._lock:
+            for member in self._state.get("roster", DEFAULT_ROSTER):
+                if member.get("id") == member_id:
+                    return dict(member)
+        return None
+
     def refresh_roster(self) -> list[dict[str, Any]]:
         """Re-read agents_config.json and update roster in memory."""
         with self._lock:
-            self._state["roster"] = _load_roster(self._data_dir)
+            self._state["roster"] = _apply_member_overrides(
+                _load_roster(self._data_dir),
+                self._state.setdefault("member_overrides", {}),
+            )
             self._save_state()
             return [dict(m) for m in self._state["roster"]]
+
+    def update_member(self, member_id: str, patch: dict[str, Any]) -> dict[str, Any]:
+        member_id = (member_id or "").strip()
+        if not member_id:
+            raise ValueError("member_id required")
+        allowed = {"name", "display_name", "color"}
+        clean: dict[str, str] = {}
+        for key in allowed:
+            value = patch.get(key)
+            if isinstance(value, str) and value.strip():
+                clean[key] = value.strip()[:40] if key != "color" else value.strip()[:16]
+        with self._lock:
+            roster = self._state.get("roster", DEFAULT_ROSTER)
+            if not any(m.get("id") == member_id for m in roster):
+                raise KeyError(member_id)
+            overrides = self._state.setdefault("member_overrides", {})
+            current = dict(overrides.get(member_id) or {})
+            current.update(clean)
+            overrides[member_id] = current
+            self._state["roster"] = _apply_member_overrides(_load_roster(self._data_dir), overrides)
+            self._save_state()
+            for member in self._state["roster"]:
+                if member.get("id") == member_id:
+                    return dict(member)
+        raise KeyError(member_id)
 
     # ── Presence / typing ──────────────────────────────────────────────
 
@@ -129,6 +179,40 @@ class GroupChatStore:
                 "online": dict(self._state.get("online", {})),
                 "typing": dict(self._state.get("typing", {})),
             }
+
+    # ── Agent bridge cursors ───────────────────────────────────────────
+
+    def latest_ts(self) -> str | None:
+        latest = None
+        if not self._msg_path.exists():
+            return latest
+        with self._lock:
+            with self._msg_path.open("r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        rec = json.loads(line)
+                    except Exception:
+                        continue
+                    latest = rec.get("ts") or latest
+        return latest
+
+    def get_agent_offset(self, agent_id: str) -> str | None:
+        with self._lock:
+            return self._state.setdefault("agent_offsets", {}).get(agent_id)
+
+    def set_agent_offset(self, agent_id: str, ts: str) -> None:
+        if not agent_id or not ts:
+            return
+        with self._lock:
+            self._state.setdefault("agent_offsets", {})[agent_id] = ts
+            self._save_state()
+
+    def agent_offsets(self) -> dict[str, str]:
+        with self._lock:
+            return dict(self._state.setdefault("agent_offsets", {}))
 
     # ── Messages ───────────────────────────────────────────────────────
 
@@ -200,6 +284,56 @@ class GroupChatStore:
                         break
         return records if since_ts else records[-limit:]
 
+    def agent_inbox(
+        self,
+        agent_id: str,
+        *,
+        since_ts: str | None = None,
+        limit: int = 50,
+        include_broadcast: bool = True,
+    ) -> list[dict[str, Any]]:
+        """Return messages targeted at *agent_id* after *since_ts*."""
+        member = self.get_member(agent_id)
+        if not member:
+            return []
+
+        records: list[dict[str, Any]] = []
+        for rec in self.poll(since_ts=since_ts, limit=5000):
+            if self._targets_agent(rec, member, include_broadcast=include_broadcast):
+                records.append(rec)
+                if len(records) >= limit:
+                    break
+        return records
+
+    @staticmethod
+    def _targets_agent(rec: dict[str, Any], member: dict[str, Any], *, include_broadcast: bool = True) -> bool:
+        agent_id = member.get("id")
+        if not agent_id or rec.get("sender_id") == agent_id:
+            return False
+        if rec.get("message_type") == "system":
+            return False
+
+        explicit_targets: set[str] = set()
+        for key in ("mentions", "delivery_targets"):
+            val = rec.get(key)
+            if isinstance(val, list):
+                explicit_targets.update(str(x) for x in val)
+        delivery = rec.get("delivery")
+        if isinstance(delivery, dict):
+            targets = delivery.get("targets")
+            if isinstance(targets, list):
+                explicit_targets.update(str(x) for x in targets)
+
+        if explicit_targets:
+            return agent_id in explicit_targets
+
+        if not include_broadcast:
+            return False
+
+        # Unmentioned user messages go only to the default responder. Agent
+        # messages must explicitly mention another agent to avoid reply loops.
+        return rec.get("sender_id") == "user" and bool(member.get("default_responder"))
+
 
 def _now_iso() -> str:
-    return datetime.now(timezone.utc).astimezone().isoformat(timespec="milliseconds")
+    return datetime.now(timezone.utc).astimezone().isoformat(timespec="microseconds")

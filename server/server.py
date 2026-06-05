@@ -5,8 +5,11 @@ import argparse
 import json
 import logging
 import os
+import re
+import shlex
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 try:
@@ -131,7 +134,24 @@ class ServerState:
         self.bus_hook_path: str = tmux_cfg.get("bus_hook_path", "")
 
         self.active_session: str = self.default_session
+        self.active_chat_id: str = self.default_session
+        self.chat.ensure_conversation(self.active_chat_id, title="Current chat", tmux_session=self.default_session)
         self.typing_state: dict[str, Any] = {"is_typing": False, "since": None}
+
+        bridge_cfg = config.get("group_bridge", {})
+        self.group_bridge_enabled: bool = bool(bridge_cfg.get("enabled", True))
+        self.group_bridge_interval: float = float(bridge_cfg.get("interval_seconds", 2.0))
+        self.group_codex_command: str = str(bridge_cfg.get("codex_command", "codex") or "codex")
+        self.group_codex_model: str = str(bridge_cfg.get("codex_model", "") or "").strip()
+        self.group_codex_workdir: str = str(bridge_cfg.get("codex_workdir", str(HERE.parent)) or HERE.parent)
+        self.group_codex_timeout_seconds: float = float(bridge_cfg.get("codex_timeout_seconds", 180))
+        extra_args = bridge_cfg.get("codex_extra_args", [])
+        if isinstance(extra_args, str):
+            extra_args = shlex.split(extra_args)
+        self.group_codex_extra_args: list[str] = [str(arg) for arg in extra_args] if isinstance(extra_args, list) else []
+        self.group_bridge_lock = threading.Lock()
+        self.group_bridge_busy: set[str] = set()
+        self.group_bridge_started = False
 
     @classmethod
     def from_config(cls, config_path: str | Path) -> "ServerState":
@@ -211,11 +231,14 @@ class RequestHandler(BaseHTTPRequestHandler):
         if path.startswith("/chat/history"):
             self._handle_chat_history()
             return
+        if path == "/chat/conversations":
+            self._handle_chat_conversations()
+            return
         if path.startswith("/chat/search"):
             self._handle_chat_search()
             return
         if path == "/chat/status":
-            self._send_json(200, {"ok": True, **self.state.typing_state})
+            self._send_json(200, {"ok": True, "active_conversation": self.state.active_chat_id, **self.state.typing_state})
             return
 
         if path.startswith("/tmux/capture"):
@@ -284,6 +307,12 @@ class RequestHandler(BaseHTTPRequestHandler):
         if path.startswith("/group/poll"):
             self._handle_group_poll()
             return
+        if path.startswith("/group/agent/inbox"):
+            self._handle_group_agent_inbox()
+            return
+        if path == "/group/agent/status":
+            self._handle_group_agent_status()
+            return
 
         self._send_json(404, {"error": "not found"})
 
@@ -307,10 +336,14 @@ class RequestHandler(BaseHTTPRequestHandler):
             self._handle_chat_append(body)
         elif path == "/chat/delete":
             self._handle_chat_delete(body)
+        elif path == "/chat/conversation/delete":
+            self._handle_chat_conversation_delete(body)
         elif path == "/chat/react":
             self._handle_chat_react(body)
         elif path == "/chat/regenerate":
             self._handle_chat_regenerate(body)
+        elif path == "/chat/switch":
+            self._handle_chat_switch(body)
         elif path == "/tmux/send":
             self._handle_tmux_send(body)
         elif path == "/favorites/add":
@@ -365,8 +398,14 @@ class RequestHandler(BaseHTTPRequestHandler):
             self._handle_group_send(body)
         elif path == "/group/typing":
             self._handle_group_typing(body)
+        elif path == "/group/member/update":
+            self._handle_group_member_update(body)
         elif path == "/group/roster_heartbeat":
             self._handle_group_heartbeat(body)
+        elif path == "/group/agent/reply":
+            self._handle_group_agent_reply(body)
+        elif path == "/group/agent/ack":
+            self._handle_group_agent_ack(body)
         else:
             self._send_json(404, {"error": "not found"})
 
@@ -382,6 +421,7 @@ class RequestHandler(BaseHTTPRequestHandler):
 
         rec = self.state.chat.append(
             role="user", text=text, source="pwa", quoted_ts=quoted_ts, location=location,
+            conversation_id=self.state.active_chat_id,
         )
 
         ts_prefix = "[" + datetime.now().strftime("%Y-%m-%d %H:%M:%S") + "]"
@@ -409,7 +449,7 @@ class RequestHandler(BaseHTTPRequestHandler):
             subprocess.run(["tmux", "send-keys", "-t", session, "Enter"], check=False)
             threading.Thread(
                 target=self._watch_reply_once,
-                args=(session, rec["ts"]),
+                args=(session, rec["ts"], self.state.active_chat_id),
                 daemon=True,
             ).start()
         except Exception as e:
@@ -418,7 +458,7 @@ class RequestHandler(BaseHTTPRequestHandler):
         self._send_json(200, {"ok": True, "record": rec})
 
     def _inject_to_active_claude(self, text: str, source: str = "pwa", context: str = "") -> dict[str, Any]:
-        rec = self.state.chat.append(role="user", text=text, source=source)
+        rec = self.state.chat.append(role="user", text=text, source=source, conversation_id=self.state.active_chat_id)
         ts_prefix = "[" + datetime.now().strftime("%Y-%m-%d %H:%M:%S") + "]"
         injected = f"{ts_prefix} {text}"
         if context:
@@ -434,7 +474,7 @@ class RequestHandler(BaseHTTPRequestHandler):
             subprocess.run(["tmux", "send-keys", "-t", session, "Enter"], check=False)
             threading.Thread(
                 target=self._watch_reply_once,
-                args=(session, rec["ts"]),
+                args=(session, rec["ts"], self.state.active_chat_id),
                 daemon=True,
             ).start()
         except Exception as e:
@@ -502,7 +542,7 @@ class RequestHandler(BaseHTTPRequestHandler):
         text = "\n".join(reply_lines).strip()
         return text if len(text) >= 2 else None
 
-    def _watch_reply_once(self, session: str, user_ts: str):
+    def _watch_reply_once(self, session: str, user_ts: str, conversation_id: str | None = None):
         deadline = time.time() + 180
         last_capture = ""
         stable_count = 0
@@ -521,7 +561,7 @@ class RequestHandler(BaseHTTPRequestHandler):
             reply = self._extract_reply_from_capture(content)
             if not reply:
                 continue
-            recent = self.state.chat.tail(6)
+            recent = self.state.chat.tail(6, conversation_id=conversation_id)
             if any(r.get("role") == "assistant" and r.get("text") == reply for r in recent):
                 return
             tool_result = self.state.study.apply_ai_tools(reply)
@@ -530,6 +570,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                 role="assistant",
                 text=display_reply,
                 source="claude-code",
+                conversation_id=conversation_id or self.state.active_chat_id,
                 metadata={"study_tools": tool_result.get("applied", [])} if tool_result.get("applied") else None,
             )
             self.state.typing_state = {"is_typing": False, "since": None}
@@ -548,6 +589,7 @@ class RequestHandler(BaseHTTPRequestHandler):
             role="assistant",
             text=display_text,
             source=source,
+            conversation_id=self.state.active_chat_id,
             metadata={"study_tools": tool_result.get("applied", [])} if tool_result.get("applied") else None,
         )
         self.state.typing_state = {"is_typing": False, "since": None}
@@ -557,14 +599,76 @@ class RequestHandler(BaseHTTPRequestHandler):
         qs = parse_qs(urlparse(self.path).query)
         since = qs.get("since", [None])[0]
         before = qs.get("before", [None])[0]
+        conversation_id = qs.get("conversation_id", [self.state.active_chat_id])[0]
         try:
             limit = int(qs.get("limit", ["10000"])[0])
         except Exception:
             limit = 10000
         limit = min(max(limit, 1), 10000)
 
-        records = self.state.chat.read_since(since_ts=since, before_ts=before, limit=limit)
-        self._send_json(200, {"ok": True, "records": records, "count": len(records)})
+        records = self.state.chat.read_since(since_ts=since, before_ts=before, limit=limit, conversation_id=conversation_id)
+        self._send_json(200, {"ok": True, "records": records, "count": len(records), "conversation_id": conversation_id})
+
+    def _handle_chat_conversations(self):
+        qs = parse_qs(urlparse(self.path).query)
+        try:
+            limit = int(qs.get("limit", ["100"])[0])
+        except Exception:
+            limit = 100
+        convs = self.state.chat.list_conversations(active_id=self.state.active_chat_id, limit=min(max(limit, 1), 200))
+        self._send_json(200, {"ok": True, "active": self.state.active_chat_id, "conversations": convs})
+
+    def _handle_chat_switch(self, body: dict[str, Any]):
+        conversation_id = (body.get("conversation_id") or body.get("id") or "").strip()
+        if not conversation_id:
+            self._send_json(400, {"error": "conversation_id required"})
+            return
+        conv = self.state.chat.ensure_conversation(conversation_id, tmux_session=conversation_id)
+        tmux_session = conv.get("tmux_session") or conversation_id
+        if _tmux_has_session(tmux_session):
+            self.state.active_session = tmux_session
+        self.state.active_chat_id = conversation_id
+        self.state.typing_state = {"is_typing": False, "since": None}
+        self._send_json(200, {"ok": True, "active": conversation_id, "tmux_session": self.state.active_session})
+
+    def _handle_chat_conversation_delete(self, body: dict[str, Any]):
+        conversation_id = (body.get("conversation_id") or body.get("id") or "").strip()
+        if not conversation_id:
+            self._send_json(400, {"error": "conversation_id required"})
+            return
+
+        current = next(
+            (c for c in self.state.chat.list_conversations(active_id=self.state.active_chat_id, limit=500) if c.get("id") == conversation_id),
+            {},
+        )
+        tmux_session = str(current.get("tmux_session") or conversation_id)
+        deleted = self.state.chat.delete_conversation(conversation_id)
+        conv_id = deleted["conversation_id"]
+
+        killed_tmux = False
+        kill_tmux = body.get("kill_tmux", True) not in {False, "false", "0", 0}
+        if kill_tmux and tmux_session and tmux_session != self.state.default_session and _tmux_has_session(tmux_session):
+            try:
+                result = subprocess.run(["tmux", "kill-session", "-t", f"={tmux_session}"], capture_output=True, text=True, timeout=3)
+                killed_tmux = result.returncode == 0
+            except Exception:
+                killed_tmux = False
+
+        if self.state.active_chat_id == conv_id or self.state.active_session == tmux_session:
+            fallback = self.state.default_session
+            if _tmux_has_session(fallback):
+                self.state.active_session = fallback
+            self.state.active_chat_id = fallback
+            self.state.chat.ensure_conversation(fallback, title="Current chat", tmux_session=fallback)
+            self.state.typing_state = {"is_typing": False, "since": None}
+
+        self._send_json(200, {
+            "ok": True,
+            **deleted,
+            "killed_tmux": killed_tmux,
+            "active": self.state.active_chat_id,
+            "active_session": self.state.active_session,
+        })
 
     def _handle_chat_search(self):
         qs = parse_qs(urlparse(self.path).query)
@@ -575,7 +679,8 @@ class RequestHandler(BaseHTTPRequestHandler):
             limit = int(qs.get("limit", ["5000"])[0])
         except Exception:
             limit = 5000
-        records = self.state.chat.search(keyword=keyword, date_prefix=date_prefix, role=role, limit=limit)
+        conversation_id = qs.get("conversation_id", [None])[0]
+        records = self.state.chat.search(keyword=keyword, date_prefix=date_prefix, role=role, limit=limit, conversation_id=conversation_id)
         self._send_json(200, {"ok": True, "records": records, "count": len(records)})
 
     def _handle_chat_delete(self, body: dict[str, Any]):
@@ -603,7 +708,7 @@ class RequestHandler(BaseHTTPRequestHandler):
             return
         self.state.chat.mark_regenerated(old_ts)
         if new_text:
-            rec = self.state.chat.append(role="assistant", text=new_text, source="regenerate")
+            rec = self.state.chat.append(role="assistant", text=new_text, source="regenerate", conversation_id=self.state.active_chat_id)
             self._send_json(200, {"ok": True, "record": rec})
         else:
             self._send_json(200, {"ok": True})
@@ -613,19 +718,29 @@ class RequestHandler(BaseHTTPRequestHandler):
     def _handle_tmux_capture(self):
         qs = parse_qs(urlparse(self.path).query)
         session = qs.get("session", [self.state.default_session])[0]
+        join_wrapped = qs.get("join", ["0"])[0] in {"1", "true", "yes"}
         try:
             lines = int(qs.get("lines", ["120"])[0])
         except Exception:
             lines = 120
         try:
+            cmd = ["tmux", "capture-pane", "-t", session, "-p"]
+            if join_wrapped:
+                cmd.append("-J")
+            cmd.extend(["-S", str(-lines)])
             result = subprocess.run(
-                ["tmux", "capture-pane", "-t", session, "-p", "-S", str(-lines)],
+                cmd,
                 capture_output=True, text=True, timeout=3,
             )
             if result.returncode != 0:
                 self._send_json(404, {"error": result.stderr.strip() or "session not found"})
                 return
-            self._send_json(200, {"ok": True, "session": session, "content": result.stdout})
+            size_result = subprocess.run(
+                ["tmux", "display-message", "-p", "-t", session, "#{window_width}x#{window_height}"],
+                capture_output=True, text=True, timeout=3,
+            )
+            size = size_result.stdout.strip() if size_result.returncode == 0 else ""
+            self._send_json(200, {"ok": True, "session": session, "content": result.stdout.rstrip("\n"), "joined": join_wrapped, "size": size})
         except Exception as e:
             self._send_json(500, {"error": str(e)})
 
@@ -969,6 +1084,8 @@ class RequestHandler(BaseHTTPRequestHandler):
             self._send_json(400, {"error": "text required"})
             return
         mentions = body.get("mentions") or []
+        if not mentions:
+            mentions = _extract_group_mentions(text, self.state.group.get_roster())
         message_type = body.get("message_type", "chat")
         task_id = body.get("task_id") or None
         delivery_targets = body.get("delivery_targets") or None
@@ -989,10 +1106,125 @@ class RequestHandler(BaseHTTPRequestHandler):
         self.state.group.set_typing(sender_id, typing)
         self._send_json(200, {"ok": True})
 
+    def _handle_group_member_update(self, body: dict[str, Any]):
+        member_id = body.get("member_id", body.get("id", "user")).strip()
+        patch = {
+            "name": body.get("name") or body.get("display_name"),
+            "display_name": body.get("display_name") or body.get("name"),
+            "color": body.get("color"),
+        }
+        try:
+            member = self.state.group.update_member(member_id, patch)
+            self._send_json(200, {"ok": True, "member": member, "roster": self.state.group.get_roster()})
+        except KeyError:
+            self._send_json(404, {"error": f"member '{member_id}' not found"})
+        except ValueError as e:
+            self._send_json(400, {"error": str(e)})
+
     def _handle_group_heartbeat(self, body: dict[str, Any]):
         sender_id = body.get("sender_id", "user").strip()
         self.state.group.heartbeat(sender_id)
         self._send_json(200, {"ok": True})
+
+    def _handle_group_agent_inbox(self):
+        qs = parse_qs(urlparse(self.path).query)
+        agent_id = qs.get("agent_id", [""])[0].strip()
+        if not agent_id:
+            self._send_json(400, {"error": "agent_id required"})
+            return
+        if not self.state.group.get_member(agent_id):
+            self._send_json(404, {"error": f"agent '{agent_id}' not found"})
+            return
+        try:
+            limit = int(qs.get("limit", ["50"])[0])
+        except Exception:
+            limit = 50
+        limit = min(max(limit, 1), 500)
+        since = qs.get("since", [None])[0] or self.state.group.get_agent_offset(agent_id)
+        include_broadcast = qs.get("include_broadcast", ["1"])[0] not in {"0", "false", "no"}
+        mark_seen = qs.get("mark_seen", ["0"])[0] in {"1", "true", "yes"}
+
+        records = self.state.group.agent_inbox(
+            agent_id,
+            since_ts=since,
+            limit=limit,
+            include_broadcast=include_broadcast,
+        )
+        if mark_seen and records:
+            self.state.group.set_agent_offset(agent_id, records[-1]["ts"])
+        self.state.group.heartbeat(agent_id)
+        self._send_json(200, {
+            "ok": True,
+            "agent_id": agent_id,
+            "records": records,
+            "count": len(records),
+            "cursor": self.state.group.get_agent_offset(agent_id),
+        })
+
+    def _handle_group_agent_reply(self, body: dict[str, Any]):
+        agent_id = body.get("agent_id", "").strip()
+        text = body.get("text", "").strip()
+        if not agent_id:
+            self._send_json(400, {"error": "agent_id required"})
+            return
+        if not text:
+            self._send_json(400, {"error": "text required"})
+            return
+        if not self.state.group.get_member(agent_id):
+            self._send_json(404, {"error": f"agent '{agent_id}' not found"})
+            return
+        mentions = body.get("mentions")
+        if not isinstance(mentions, list):
+            mentions = _extract_group_mentions(text, self.state.group.get_roster())
+        rec = self.state.group.send(
+            agent_id,
+            text,
+            mentions=mentions or None,
+            message_type=body.get("message_type", "chat"),
+            task_id=body.get("task_id") or None,
+            delivery_targets=body.get("delivery_targets") or None,
+        )
+        ack_ts = body.get("ack_ts")
+        if ack_ts:
+            self.state.group.set_agent_offset(agent_id, ack_ts)
+        self.state.group.heartbeat(agent_id)
+        self._send_json(200, {"ok": True, "record": rec})
+
+    def _handle_group_agent_ack(self, body: dict[str, Any]):
+        agent_id = body.get("agent_id", "").strip()
+        ts = body.get("ts", "").strip()
+        if not agent_id or not ts:
+            self._send_json(400, {"error": "agent_id and ts required"})
+            return
+        if not self.state.group.get_member(agent_id):
+            self._send_json(404, {"error": f"agent '{agent_id}' not found"})
+            return
+        self.state.group.set_agent_offset(agent_id, ts)
+        self.state.group.heartbeat(agent_id)
+        self._send_json(200, {"ok": True, "agent_id": agent_id, "cursor": ts})
+
+    def _handle_group_agent_status(self):
+        roster = self.state.group.get_roster()
+        agents = []
+        for member in roster:
+            if not member.get("can_reply"):
+                continue
+            agent_id = member.get("id", "")
+            agents.append({
+                "id": agent_id,
+                "name": member.get("display_name") or member.get("name") or agent_id,
+                "bridge": _group_bridge_kind(member),
+                "cursor": self.state.group.get_agent_offset(agent_id),
+                "busy": agent_id in self.state.group_bridge_busy,
+                "tmux_session": _group_tmux_session(self.state, member) if _group_bridge_kind(member) == "tmux" else None,
+            })
+        self._send_json(200, {
+            "ok": True,
+            "enabled": self.state.group_bridge_enabled,
+            "started": self.state.group_bridge_started,
+            "agents": agents,
+            "offsets": self.state.group.agent_offsets(),
+        })
 
     def _handle_diag(self):
         import time as _time
@@ -1084,7 +1316,10 @@ class RequestHandler(BaseHTTPRequestHandler):
             # Launch interactive claude in the new session
             subprocess.run(["tmux", "send-keys", "-t", name, "claude", "Enter"], check=False)
             self.state.active_session = name
-            self._send_json(200, {"ok": True, "session": name, "active": name, "launched_claude": True})
+            self.state.active_chat_id = name
+            conv = self.state.chat.ensure_conversation(name, title="New chat", tmux_session=name)
+            self.state.typing_state = {"is_typing": False, "since": None}
+            self._send_json(200, {"ok": True, "session": name, "active": name, "conversation": conv, "launched_claude": True})
         except Exception as e:
             self._send_json(500, {"error": str(e)})
 
@@ -1102,6 +1337,9 @@ class RequestHandler(BaseHTTPRequestHandler):
                 self._send_json(404, {"error": f"session '{session}' not found"})
                 return
             self.state.active_session = session
+            self.state.active_chat_id = session
+            self.state.chat.ensure_conversation(session, tmux_session=session)
+            self.state.typing_state = {"is_typing": False, "since": None}
             self._send_json(200, {"ok": True, "active": session})
         except Exception as e:
             self._send_json(500, {"error": str(e)})
@@ -1182,7 +1420,7 @@ class RequestHandler(BaseHTTPRequestHandler):
             file_descriptions.append(f'{kind}: {f["filename"]} (服务器路径: {f["path"]})')
 
         hint_text = "用户上传了附件:\n" + "\n".join(file_descriptions)
-        rec = self.state.chat.append(role="user", text=hint_text, source="pwa-upload")
+        rec = self.state.chat.append(role="user", text=hint_text, source="pwa-upload", conversation_id=self.state.active_chat_id)
 
         session = self.state.active_session
         ts_prefix = "[" + datetime.now().strftime("%Y-%m-%d %H:%M:%S") + "]"
@@ -1200,11 +1438,411 @@ class RequestHandler(BaseHTTPRequestHandler):
         self._send_json(200, {"ok": True, "files": saved_files, "record": rec})
 
 
+def _group_bridge_kind(member: dict[str, Any]) -> str:
+    bridge = str(member.get("bridge") or member.get("transport") or "").strip().lower()
+    if bridge:
+        return bridge
+    model = str(member.get("model") or "").lower()
+    if "claude" in model:
+        return "tmux"
+    if "codex" in model:
+        return "app_server"
+    return "manual"
+
+
+def _group_tmux_session(state: ServerState, member: dict[str, Any]) -> str:
+    explicit = str(member.get("tmux_session") or "").strip()
+    if explicit:
+        return explicit
+    for candidate in (state.active_session, state.default_session):
+        if candidate and _tmux_has_session(candidate):
+            return candidate
+    first = _tmux_first_session()
+    return first or str(state.active_session or state.default_session)
+
+
+def _tmux_has_session(session: str) -> bool:
+    if not session:
+        return False
+    try:
+        result = subprocess.run(
+            ["tmux", "list-sessions", "-F", "#{session_name}"],
+            capture_output=True, text=True, timeout=3,
+        )
+        if result.returncode != 0:
+            return False
+        return session in {line.strip() for line in result.stdout.splitlines() if line.strip()}
+    except Exception:
+        return False
+
+
+def _tmux_first_session() -> str | None:
+    try:
+        result = subprocess.run(
+            ["tmux", "list-sessions", "-F", "#{session_name}"],
+            capture_output=True, text=True, timeout=3,
+        )
+        if result.returncode != 0:
+            return None
+        for line in result.stdout.splitlines():
+            name = line.strip()
+            if name:
+                return name
+    except Exception:
+        return None
+    return None
+
+
+def _extract_group_mentions(text: str, roster: list[dict[str, Any]]) -> list[str]:
+    aliases: dict[str, str] = {}
+    for member in roster:
+        agent_id = str(member.get("id") or "").strip()
+        if not agent_id:
+            continue
+        names = {
+            agent_id,
+            str(member.get("name") or "").strip(),
+            str(member.get("display_name") or "").strip(),
+        }
+        for name in list(names):
+            if name:
+                names.add(name.replace(" ", "_"))
+        for name in names:
+            if name:
+                aliases[name.lstrip("@").lower()] = agent_id
+    mentions: list[str] = []
+    for match in re.finditer(r"@([^\s@，,。:：;；)）\]}]+)", text):
+        token = match.group(1).rstrip(".!?！？、").lower()
+        agent_id = aliases.get(token)
+        if agent_id and agent_id not in mentions:
+            mentions.append(agent_id)
+    return mentions
+
+
+def _tmux_send_text(session: str, text: str) -> None:
+    p = subprocess.Popen(["tmux", "load-buffer", "-"], stdin=subprocess.PIPE)
+    p.communicate(input=text.encode("utf-8"))
+    subprocess.run(["tmux", "paste-buffer", "-t", session, "-p"], check=False)
+    subprocess.run(["tmux", "send-keys", "-t", session, "Enter"], check=False)
+
+
+def _tmux_capture(session: str, lines: int = 80) -> str:
+    try:
+        result = subprocess.run(
+            ["tmux", "capture-pane", "-t", session, "-p", "-S", str(-lines)],
+            capture_output=True, text=True, timeout=3,
+        )
+        return result.stdout if result.returncode == 0 else ""
+    except Exception:
+        return ""
+
+
+def _format_group_tmux_prompt(agent: dict[str, Any], rec: dict[str, Any], roster: list[dict[str, Any]]) -> str:
+    agent_id = agent.get("id", "assistant")
+    agent_name = agent.get("display_name") or agent.get("name") or agent_id
+    sender_id = rec.get("sender_id", "unknown")
+    sender = next((m for m in roster if m.get("id") == sender_id), {})
+    sender_name = sender.get("display_name") or sender.get("name") or sender_id
+    task_line = f"\nTask id: {rec.get('task_id')}" if rec.get("task_id") else ""
+    return (
+        "[CcCompanion Group]\n"
+        f"You are @{agent_id} ({agent_name}) inside a shared Group chat.\n"
+        "Reply as this group member. Keep the reply suitable to post back to Group.\n"
+        "If another agent should answer, mention them with @agent_id.\n\n"
+        f"Message from @{sender_id} ({sender_name}):{task_line}\n"
+        f"{rec.get('text', '')}\n"
+    )
+
+
+def _format_group_codex_prompt(agent: dict[str, Any], rec: dict[str, Any], roster: list[dict[str, Any]]) -> str:
+    agent_id = agent.get("id", "reviewer")
+    agent_name = agent.get("display_name") or agent.get("name") or agent_id
+    sender_id = rec.get("sender_id", "unknown")
+    sender = next((m for m in roster if m.get("id") == sender_id), {})
+    sender_name = sender.get("display_name") or sender.get("name") or sender_id
+    roster_lines = []
+    for member in roster:
+        mid = member.get("id")
+        if not mid:
+            continue
+        handle = str(member.get("display_name") or member.get("name") or mid).strip().replace(" ", "_")
+        roster_lines.append(f"- @{handle}: id={mid}, role={member.get('model') or member.get('kind') or 'member'}")
+    task_line = f"\nTask id: {rec.get('task_id')}" if rec.get("task_id") else ""
+    return (
+        "You are replying inside CcCompanion Group, a shared chat between the user, Claude Code, and Codex.\n"
+        f"You are @{agent_name} (stable id: {agent_id}). Reply as this group member.\n"
+        "Return only the message text that should be posted to Group. Keep it concise and natural.\n"
+        "Do not edit files, run commands, or describe implementation details unless the Group message asks for that.\n"
+        "If another member should answer, mention them with their visible @handle from the roster.\n\n"
+        "Roster:\n"
+        + "\n".join(roster_lines)
+        + "\n\n"
+        f"Message from @{sender_name} (stable id: {sender_id}):{task_line}\n"
+        f"{rec.get('text', '')}\n"
+    )
+
+
+def _start_group_bridge(state: ServerState) -> None:
+    if not state.group_bridge_enabled or state.group_bridge_started:
+        return
+    latest = state.group.latest_ts()
+    for member in state.group.get_roster():
+        agent_id = member.get("id")
+        if not agent_id or not member.get("can_reply"):
+            continue
+        if _group_bridge_kind(member) == "tmux" and latest and not state.group.get_agent_offset(agent_id):
+            state.group.set_agent_offset(agent_id, latest)
+    state.group_bridge_started = True
+    threading.Thread(target=_group_bridge_loop, args=(state,), daemon=True).start()
+    logger.info("Group bridge started")
+
+
+def _group_bridge_loop(state: ServerState) -> None:
+    while True:
+        try:
+            _group_bridge_tick(state)
+        except Exception as exc:
+            logger.warning("group bridge tick failed: %s", exc)
+        time.sleep(max(state.group_bridge_interval, 0.5))
+
+
+def _group_bridge_tick(state: ServerState) -> None:
+    roster = state.group.get_roster()
+    for member in roster:
+        agent_id = member.get("id")
+        if not agent_id or not member.get("can_reply"):
+            continue
+        bridge = _group_bridge_kind(member)
+        if bridge not in {"tmux", "app_server", "codex", "codex_exec"}:
+            continue
+        with state.group_bridge_lock:
+            if agent_id in state.group_bridge_busy:
+                continue
+        records = state.group.agent_inbox(
+            agent_id,
+            since_ts=state.group.get_agent_offset(agent_id),
+            limit=1,
+            include_broadcast=True,
+        )
+        if records and bridge == "tmux":
+            _dispatch_group_message_to_tmux(state, member, records[0], roster)
+        elif records:
+            _dispatch_group_message_to_codex(state, member, records[0], roster)
+
+
+def _dispatch_group_message_to_tmux(
+    state: ServerState,
+    member: dict[str, Any],
+    rec: dict[str, Any],
+    roster: list[dict[str, Any]],
+) -> None:
+    agent_id = member.get("id")
+    if not agent_id:
+        return
+    session = _group_tmux_session(state, member)
+    has_session = subprocess.run(
+        ["tmux", "has-session", "-t", session],
+        capture_output=True, timeout=3,
+    )
+    if has_session.returncode != 0:
+        system_rec = state.group.send(
+            "system",
+            f"@{agent_id} tmux session '{session}' not found; message was not delivered.",
+            mentions=[agent_id],
+            message_type="system",
+        )
+        state.group.set_agent_offset(agent_id, system_rec["ts"])
+        return
+
+    with state.group_bridge_lock:
+        if agent_id in state.group_bridge_busy:
+            return
+        state.group_bridge_busy.add(agent_id)
+
+    try:
+        prompt = _format_group_tmux_prompt(member, rec, roster)
+        baseline = _tmux_capture(session, lines=80)
+        state.group.set_typing(agent_id, True)
+        _tmux_send_text(session, prompt)
+        state.group.set_agent_offset(agent_id, rec["ts"])
+        threading.Thread(
+            target=_watch_group_tmux_reply,
+            args=(state, session, agent_id, baseline),
+            daemon=True,
+        ).start()
+        logger.info("group bridge delivered %s to @%s via tmux:%s", rec.get("id"), agent_id, session)
+    except Exception as exc:
+        state.group.set_typing(agent_id, False)
+        with state.group_bridge_lock:
+            state.group_bridge_busy.discard(agent_id)
+        logger.warning("group bridge tmux dispatch failed for @%s: %s", agent_id, exc)
+
+
+def _watch_group_tmux_reply(state: ServerState, session: str, agent_id: str, baseline: str) -> None:
+    deadline = time.time() + 180
+    last_capture = ""
+    stable_count = 0
+    saw_change = False
+    try:
+        while time.time() < deadline:
+            time.sleep(2)
+            content = _tmux_capture(session, lines=80)
+            if not content:
+                continue
+            if content != baseline:
+                saw_change = True
+            if not saw_change:
+                continue
+            if content == last_capture:
+                stable_count += 1
+            else:
+                stable_count = 0
+                last_capture = content
+            if stable_count < 2 or "✻" not in content:
+                continue
+            reply = RequestHandler._extract_reply_from_capture(content)
+            if not reply:
+                continue
+            recent = state.group.poll(limit=12)
+            if any(r.get("sender_id") == agent_id and r.get("text") == reply for r in recent):
+                return
+            state.group.send(
+                agent_id,
+                reply,
+                mentions=_extract_group_mentions(reply, state.group.get_roster()) or None,
+                message_type="chat",
+            )
+            logger.info("group bridge captured @%s reply (%d chars)", agent_id, len(reply))
+            return
+    finally:
+        state.group.set_typing(agent_id, False)
+        with state.group_bridge_lock:
+            state.group_bridge_busy.discard(agent_id)
+
+
+def _dispatch_group_message_to_codex(
+    state: ServerState,
+    member: dict[str, Any],
+    rec: dict[str, Any],
+    roster: list[dict[str, Any]],
+) -> None:
+    agent_id = member.get("id")
+    if not agent_id:
+        return
+    with state.group_bridge_lock:
+        if agent_id in state.group_bridge_busy:
+            return
+        state.group_bridge_busy.add(agent_id)
+
+    state.group.set_typing(agent_id, True)
+    threading.Thread(
+        target=_watch_group_codex_reply,
+        args=(state, member, rec, roster),
+        daemon=True,
+    ).start()
+    logger.info("group bridge delivered %s to @%s via codex exec", rec.get("id"), agent_id)
+
+
+def _watch_group_codex_reply(
+    state: ServerState,
+    member: dict[str, Any],
+    rec: dict[str, Any],
+    roster: list[dict[str, Any]],
+) -> None:
+    agent_id = member.get("id") or "reviewer"
+    try:
+        prompt = _format_group_codex_prompt(member, rec, roster)
+        reply = _run_group_codex_exec(state, prompt)
+        if reply:
+            state.group.send(
+                agent_id,
+                reply,
+                mentions=_extract_group_mentions(reply, state.group.get_roster()) or None,
+                message_type="chat",
+            )
+            logger.info("group bridge captured @%s codex reply (%d chars)", agent_id, len(reply))
+        else:
+            system_rec = state.group.send(
+                "system",
+                f"@{agent_id} Codex did not return a reply.",
+                mentions=[agent_id],
+                message_type="system",
+            )
+            state.group.set_agent_offset(agent_id, system_rec["ts"])
+        if reply:
+            state.group.set_agent_offset(agent_id, rec["ts"])
+    except subprocess.TimeoutExpired:
+        system_rec = state.group.send(
+            "system",
+            f"@{agent_id} Codex timed out after {int(state.group_codex_timeout_seconds)}s.",
+            mentions=[agent_id],
+            message_type="system",
+        )
+        state.group.set_agent_offset(agent_id, system_rec["ts"])
+        logger.warning("group codex bridge timed out for @%s", agent_id)
+    except Exception as exc:
+        system_rec = state.group.send(
+            "system",
+            f"@{agent_id} Codex bridge failed: {exc}",
+            mentions=[agent_id],
+            message_type="system",
+        )
+        state.group.set_agent_offset(agent_id, system_rec["ts"])
+        logger.warning("group codex bridge failed for @%s: %s", agent_id, exc)
+    finally:
+        state.group.heartbeat(agent_id)
+        state.group.set_typing(agent_id, False)
+        with state.group_bridge_lock:
+            state.group_bridge_busy.discard(agent_id)
+
+
+def _run_group_codex_exec(state: ServerState, prompt: str) -> str:
+    with tempfile.NamedTemporaryFile(prefix="cccompanion_codex_", suffix=".txt", delete=False) as f:
+        output_path = Path(f.name)
+    cmd = [
+        state.group_codex_command,
+        "exec",
+        "--sandbox",
+        "read-only",
+        "-c",
+        'approval_policy="never"',
+        "--cd",
+        state.group_codex_workdir,
+        "--ephemeral",
+        "--output-last-message",
+        str(output_path),
+    ]
+    if state.group_codex_model:
+        cmd.extend(["--model", state.group_codex_model])
+    cmd.extend(state.group_codex_extra_args)
+    cmd.append(prompt)
+    try:
+        result = subprocess.run(
+            cmd,
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            timeout=max(state.group_codex_timeout_seconds, 10),
+        )
+        reply = output_path.read_text(encoding="utf-8").strip() if output_path.exists() else ""
+        if result.returncode != 0:
+            stderr = (result.stderr or result.stdout or "").strip().splitlines()
+            tail = stderr[-1] if stderr else f"exit {result.returncode}"
+            raise RuntimeError(tail[:240])
+        return reply
+    finally:
+        try:
+            output_path.unlink(missing_ok=True)
+        except Exception:
+            pass
+
+
 def run_server(config_path: str | Path):
     state = ServerState.from_config(config_path)
     RequestHandler.state = state
 
     server = ThreadingHTTPServer((state.host, state.port), RequestHandler)
+    _start_group_bridge(state)
     logger.info("Server starting on %s:%d", state.host, state.port)
     logger.info("Data dir: %s", state.chat.path.parent)
     if state.shared_secret:

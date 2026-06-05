@@ -5,6 +5,7 @@ import { TopBar, IconButton } from './Shell';
 import { MessageRow } from './ChatMessage';
 
 interface ChatRecord { ts: string; role: 'user' | 'assistant' | 'command'; text: string; source?: string; attachments?: { filename: string; url: string; size?: number }[]; }
+interface ChatStatus { is_typing?: boolean; active_session?: string; active_conversation?: string; since?: string | null }
 
 const NOISE = ['Welcome to Claude Code', 'Welcome back', 'Checking connectivity', '╭─', '╰─', '│', 'Claude Code v', 'Organization'];
 const SHELL_PROMPTS = ['$', '%', '#', '❯', '~]#', ']$'];
@@ -34,6 +35,7 @@ export default function ChatView({ openSidebar, showToast }: { openSidebar: () =
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
   const [lastTs, setLastTs] = useState<string | null>(null);
+  const [status, setStatus] = useState<ChatStatus>({});
   const [showCmds, setShowCmds] = useState(false);
   const [cmdFilter, setCmdFilter] = useState('');
   const logRef = useRef<HTMLDivElement>(null);
@@ -62,7 +64,28 @@ export default function ChatView({ openSidebar, showToast }: { openSidebar: () =
   }, [lastTs]);
 
   useEffect(() => { poll(); const i = setInterval(poll, 2000); return () => clearInterval(i); }, [poll]);
-  useEffect(() => { if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight; }, [filteredRecords]);
+
+  const pollStatus = useCallback(async () => {
+    try {
+      const data = await apiGet('/chat/status');
+      if (data.ok) setStatus(data);
+    } catch {}
+  }, []);
+
+  useEffect(() => { pollStatus(); const i = setInterval(pollStatus, 1500); return () => clearInterval(i); }, [pollStatus]);
+  useEffect(() => { if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight; }, [filteredRecords, status.is_typing]);
+
+  const reloadActiveConversation = useCallback(async () => {
+    setRecords([]);
+    setLastTs(null);
+    try {
+      const data = await apiGet('/chat/history?limit=200');
+      if (data.ok && Array.isArray(data.records)) {
+        setRecords(data.records);
+        if (data.records.length > 0) setLastTs(data.records[data.records.length - 1].ts);
+      }
+    } catch {}
+  }, []);
 
   // Auto-resize textarea
   useEffect(() => {
@@ -76,9 +99,9 @@ export default function ChatView({ openSidebar, showToast }: { openSidebar: () =
     try {
       switch (cmd) {
         case '/help': appendLocal('command', COMMANDS.map(c => `${c.cmd} — ${c.desc}`).join('\n')); return;
-        case '/new': { const d = await apiPost('/chain/new_session', { name: arg }); appendLocal('command', `已创建: ${d.session}，Claude 已启动`); return; }
+        case '/new': { const d = await apiPost('/chain/new_session', { name: arg }); await reloadActiveConversation(); showToast?.(`新会话: ${d.session}`, 'success'); return; }
         case '/list': { const d = await apiGet('/chain/sessions'); appendLocal('command', d.sessions.map((s: string) => `${s === d.active ? '→ ' : '  '}${s}`).join('\n')); return; }
-        case '/switch': { if (!arg) { appendLocal('command', '用法: /switch <name>'); return; } const d = await apiPost('/chain/switch', { session: arg }); appendLocal('command', `已切换: ${d.active}`); return; }
+        case '/switch': { if (!arg) { appendLocal('command', '用法: /switch <name>'); return; } const d = await apiPost('/chain/switch', { session: arg }); await reloadActiveConversation(); showToast?.(`已切换: ${d.active}`, 'success'); return; }
         case '/stop': await apiPost('/chain/abort', {}); appendLocal('command', '已发送 Ctrl+C'); return;
         case '/clear': await apiPost('/tmux/send', { keys: 'clear', enter: true }); appendLocal('command', '已清屏'); return;
         case '/compact': await apiPost('/tmux/send', { keys: '/compact', enter: true }); appendLocal('command', '已发送 /compact'); return;
@@ -99,7 +122,12 @@ export default function ChatView({ openSidebar, showToast }: { openSidebar: () =
     setShowCmds(false);
     if (text.startsWith('/')) { setInput(""); const [cmd, ...rest] = text.split(/\s+/); await handleSlash(cmd.toLowerCase(), rest.join(' ')); return; }
     setSending(true);
-    try { await apiPost('/chat/send', { text }); setInput(''); await poll(); } catch (e) { alert(`发送失败: ${e}`); } finally { setSending(false); }
+    try {
+      await apiPost('/chat/send', { text });
+      setStatus(prev => ({ ...prev, is_typing: true, since: new Date().toISOString() }));
+      setInput('');
+      await poll();
+    } catch (e) { alert(`发送失败: ${e}`); } finally { setSending(false); }
   };
 
   const uploadFile = async (file: File) => {
@@ -131,6 +159,18 @@ export default function ChatView({ openSidebar, showToast }: { openSidebar: () =
           <div className="chat-day"><div className="chat-day-line" /><span className="chat-day-label">Today</span><div className="chat-day-line" /></div>
         )}
         {filteredRecords.map(r => <MessageRow key={r.ts} r={r} showToast={showToast} />)}
+        {status.is_typing && (
+          <div className="msg-assistant ai-typing-row" aria-live="polite">
+            <div className="msg-assistant-head">
+              <div className="msg-assistant-avatar">C</div>
+              <span className="msg-assistant-name">Claude</span>
+            </div>
+            <div className="ai-typing-bubble">
+              <span className="thinking-dot" /><span className="thinking-dot" /><span className="thinking-dot" />
+              <span>正在输入</span>
+            </div>
+          </div>
+        )}
       </div>
 
       {showCmds && visibleCmds.length > 0 && (

@@ -11,8 +11,8 @@ export default defineConfig({
       manifest: {
         name: 'CcCompanion',
         short_name: 'Cc',
-        theme_color: '#d96d36',
-        background_color: '#1a1a1a',
+        theme_color: '#2F7D6B',
+        background_color: '#F3F6F2',
         display: 'standalone',
         icons: [
           { src: '/favicon.svg', sizes: 'any', type: 'image/svg+xml' },
@@ -33,6 +33,7 @@ export default defineConfig({
       '/chain': 'http://localhost:8795',
       '/memory': 'http://localhost:8795',
       '/study': 'http://localhost:8795',
+      '/group': 'http://localhost:8795',
     },
   },
 })

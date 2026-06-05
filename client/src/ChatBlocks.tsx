@@ -42,7 +42,7 @@ export function CodeBlock({ lang, filename, code }: { lang?: string; filename?: 
     <div style={{ margin: '4px 0 14px' }}>
       <div className="codeblock-head">
         <span>{filename || lang || 'code'}</span>
-        <button onClick={() => navigator.clipboard?.writeText(code)} style={{ background: 'transparent', border: 'none', color: '#BFB6A9', display: 'inline-flex', alignItems: 'center', gap: 4, fontFamily: 'inherit', fontSize: 'inherit', cursor: 'pointer' }}>
+        <button onClick={() => navigator.clipboard?.writeText(code)} style={{ background: 'transparent', border: 'none', color: '#F7B8CF', display: 'inline-flex', alignItems: 'center', gap: 4, fontFamily: 'inherit', fontSize: 'inherit', cursor: 'pointer' }}>
           <IconCopy size={13} /> copy
         </button>
       </div>
@@ -109,17 +109,17 @@ export function ThinkingBlock({ summary, text }: { summary?: string; text: strin
 
 export function PermissionRequest({ tool, args, description, onApprove, onDeny }: { tool: string; args?: Record<string, unknown>; description?: string; onApprove: () => void; onDeny: () => void }) {
   return (
-    <div style={{ margin: '4px 0 14px', background: '#FFF7E8', border: '1px solid #E8C97A', borderRadius: 16, padding: 14 }}>
+    <div style={{ margin: '4px 0 14px', background: '#FFF0F6', border: '1px solid #F0B7CC', borderRadius: 16, padding: 14 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
         <span style={{ width: 24, height: 24, borderRadius: '50%', background: 'var(--warn)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><IconLock size={13} /></span>
-        <span style={{ fontSize: 13, fontWeight: 700, color: '#7a5510' }}>Permission required</span>
+        <span style={{ fontSize: 13, fontWeight: 700, color: '#8A315B' }}>Permission required</span>
       </div>
       <div className="mono" style={{ fontSize: 12, color: 'var(--ink-2)', background: 'rgba(255,255,255,0.6)', padding: '8px 10px', borderRadius: 8, marginBottom: 8, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
         {tool}({Object.entries(args || {}).map(([k, v]) => `${k}: ${JSON.stringify(v)}`).join(', ')})
       </div>
       {description && <div style={{ fontSize: 13, color: 'var(--ink-2)', lineHeight: 1.5, marginBottom: 12 }}>{description}</div>}
       <div style={{ display: 'flex', gap: 8 }}>
-        <button onClick={onDeny} style={{ flex: 1, padding: '10px 0', borderRadius: 999, background: 'transparent', border: '1px solid #E8C97A', color: '#7a5510', fontSize: 13.5, fontWeight: 600 }}>Deny</button>
+        <button onClick={onDeny} style={{ flex: 1, padding: '10px 0', borderRadius: 999, background: 'transparent', border: '1px solid #F0B7CC', color: '#8A315B', fontSize: 13.5, fontWeight: 600 }}>Deny</button>
         <button onClick={onApprove} style={{ flex: 1.4, padding: '10px 0', borderRadius: 999, background: 'var(--ink)', border: 'none', color: 'var(--bg)', fontSize: 13.5, fontWeight: 700 }}>Allow once</button>
         <button onClick={onApprove} style={{ flex: 1.2, padding: '10px 0', borderRadius: 999, background: 'transparent', border: '1px solid var(--ink)', color: 'var(--ink)', fontSize: 13.5, fontWeight: 600 }}>Always</button>
       </div>
