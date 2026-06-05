@@ -372,34 +372,6 @@ class RequestHandler(BaseHTTPRequestHandler):
 
     # ---- Chat handlers ----
 
-    def _study_tool_prompt(self) -> str:
-        try:
-            game = self.state.study.game()
-            sources = self.state.study.list_sources()[:12]
-        except Exception:
-            game = {"points": 0, "tasks": [], "shop": []}
-            sources = []
-        pending = [t for t in game.get("tasks", []) if t.get("status") == "pending"][:10]
-        lines = [
-            "--- STUDY TOOL PROTOCOL ---",
-            "你可以用隐藏 JSON 工具控制学习系统。工具 JSON 会被 CcCompanion 执行并从聊天显示中隐藏。",
-            "只有在你真的要创建任务、判作业、加减分、发道具、上架限时道具或完成资料时才输出工具 JSON。",
-            "请把工具 JSON 放在独立的 ```json 代码块里；自然语言回复照常写在代码块外。",
-            f"当前积分: {game.get('points', 0)}",
-            "待完成任务: " + ("; ".join(f"{t.get('id')}={t.get('title')}" for t in pending) if pending else "无"),
-            "商店道具ID: " + ", ".join(i.get("id", "") for i in game.get("shop", [])),
-            "资料ID: " + ("; ".join(f"{s.get('id')}={s.get('title')}" for s in sources) if sources else "无"),
-            "可用格式示例:",
-            '{"study_tool":{"action":"create_task","title":"HTML 表单小测","description":"回答后在 Study 页面提交","questions":["label 的 for 属性有什么用？","button 默认 type 是什么？"],"source_id":"src_0001","minutes":30,"reward":10,"penalty":-5}}',
-            '{"task_judge":{"id":"task_0001","passed":true,"score":10,"comment":"完成得很好"}}',
-            '{"add_points":5,"reason":"主动复习奖励"}',
-            '{"grant_item":{"id":"double","name":"双倍积分","desc":"下个任务双倍"}}',
-            '{"custom_item":{"name":"限时亲亲券","desc":"完成下一题后兑现","price":20,"effect":"鼓励","minutes":60}}',
-            '{"complete_source":"src_0001"}',
-            "--- END STUDY TOOL PROTOCOL ---",
-        ]
-        return "\n".join(lines)
-
     def _handle_chat_send(self, body: dict[str, Any]):
         text = body.get("text", "").strip()
         quoted_ts = body.get("quoted_ts") or None
@@ -425,11 +397,6 @@ class RequestHandler(BaseHTTPRequestHandler):
             if mem_ctx:
                 injected = f"{mem_ctx}\n\n{injected}"
 
-        study_ctx = self.state.study.context_for(text, limit=5)
-        if study_ctx:
-            injected = f"{study_ctx}\n\n{injected}"
-        injected = f"{self._study_tool_prompt()}\n\n{injected}"
-
         self.state.typing_state = {"is_typing": True, "since": rec["ts"]}
 
         session = self.state.active_session
@@ -454,11 +421,8 @@ class RequestHandler(BaseHTTPRequestHandler):
         rec = self.state.chat.append(role="user", text=text, source=source)
         ts_prefix = "[" + datetime.now().strftime("%Y-%m-%d %H:%M:%S") + "]"
         injected = f"{ts_prefix} {text}"
-        tool_prompt = self._study_tool_prompt()
         if context:
-            injected = f"{tool_prompt}\n\n{context}\n\n{injected}"
-        else:
-            injected = f"{tool_prompt}\n\n{injected}"
+            injected = f"{context}\n\n{injected}"
         self.state.typing_state = {"is_typing": True, "since": rec["ts"]}
         session = self.state.active_session
         try:
@@ -908,6 +872,7 @@ class RequestHandler(BaseHTTPRequestHandler):
             "优先依据 STUDY KNOWLEDGE CONTEXT 回答；如果资料不足，明确说资料里没有，并给出下一步学习建议。",
             "回答结构：先给结论，再拆步骤，最后给 1-3 个小练习或检查问题。",
             "不要编造来源，不要要求用户再去设置 API。",
+            "如需更新学习任务、积分、道具或章节状态，请调用 cccompanion-study MCP 工具，不要输出 JSON 工具块。",
         ]
         if source:
             system.append(f"当前资料: {source.get('title', '')}")

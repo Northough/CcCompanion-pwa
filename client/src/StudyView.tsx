@@ -124,7 +124,7 @@ export default function StudyView({ openSidebar, showToast }: { openSidebar: () 
       await apiPost('/study/ask', {
         mode: 'coach',
         source_id: task.source_id || selectedId || undefined,
-        question: `我在 Study 面板提交学习任务，请你严格判定是否通过。任务ID: ${task.id}\n任务: ${task.title}\n${task.description ? `任务说明: ${task.description}\n` : ''}${questions ? `题目:\n${questions}\n` : ''}奖励: ${task.reward}\n失败惩罚: ${task.penalty}\n我的答案:\n${answer}\n如果通过或不通过，请使用 task_judge JSON 工具判定。`,
+        question: `我在 Study 面板提交学习任务，请你严格判定是否通过。任务ID: ${task.id}\n任务: ${task.title}\n${task.description ? `任务说明: ${task.description}\n` : ''}${questions ? `题目:\n${questions}\n` : ''}奖励: ${task.reward}\n失败惩罚: ${task.penalty}\n我的答案:\n${answer}\n如果通过或不通过，请调用 MCP 工具 study_judge_task 判定。`,
       });
       setAnswers(prev => ({ ...prev, [task.id]: '' }));
       showToast?.('已提交答案，等 Claude 判定', 'success');
