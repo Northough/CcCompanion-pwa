@@ -24,6 +24,7 @@ This project is for remotely controlling an existing local Claude Code session f
 - Optional memory injection
 - Basic usage panel with `ccusage` and Claude Code statusLine support
 - **工作群 (Group Chat)** — multi-member message bus with roster, @mentions, typing/online presence, and task message types. See [docs/GROUP_CHAT.md](docs/GROUP_CHAT.md) for details.
+- **Study dashboard + MCP tools** — local learning sources, SQLite FTS5 search, points, AI-created tasks, rewards, penalties, inventory, and mystery items. Claude Code manages sources/tasks through the `cccompanion-study` MCP server; the main chat stays clean when you are not studying. See [docs/STUDY_MCP.md](docs/STUDY_MCP.md).
 - Setup skill for guided local/LAN/Tailscale deployment
 
 ## Project Layout
@@ -32,7 +33,7 @@ This project is for remotely controlling an existing local Claude Code session f
 client/                         PWA frontend
 server/                         Python server and tmux bridge
 scripts/                        smoke tests and seed helpers
-docs/                           setup and API notes
+docs/                           setup, API, group chat, and Study MCP notes
 .claude/skills/cccompanion-setup Guided setup skill
 ```
 
@@ -45,6 +46,11 @@ Local runtime files are intentionally ignored:
 - `client/dist/`
 
 Use `server/config.example.toml` as the template for a real local config.
+
+Study data also lives under `server/data/`:
+
+- `study_knowledge.sqlite3` for short-lived learning sources and the FTS5 index
+- `study_game.json` for points, tasks, inventory, and shop state
 
 ## Quick Start
 
@@ -78,6 +84,16 @@ npm run dev -- --host 0.0.0.0 --port 5174
 ```
 
 Open the PWA, go to Settings, set the server URL and shared secret, then start chatting.
+
+## Study MCP
+
+The Study page is a learning dashboard, not a second chat box. Add sources, create quizzes, judge answers, and grant rewards from Claude Code through MCP:
+
+```bash
+claude mcp add cccompanion-study -- python3 /path/to/CcCompanion-pwa/server/study_mcp_server.py --data-dir /path/to/CcCompanion-pwa/server/data
+```
+
+After registering the MCP server, restart Claude Code so the tools are available. The main chat no longer injects Study prompts or JSON tool instructions automatically.
 
 ## Guided Setup Skill
 
