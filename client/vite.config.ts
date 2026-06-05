@@ -32,6 +32,7 @@ export default defineConfig({
       '/diag': 'http://localhost:8795',
       '/chain': 'http://localhost:8795',
       '/memory': 'http://localhost:8795',
+      '/study': 'http://localhost:8795',
     },
   },
 })

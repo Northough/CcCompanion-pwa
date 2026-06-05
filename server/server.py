@@ -28,6 +28,7 @@ from settings import Settings
 from usage import UsageReader
 from memory_store import MemoryStore
 from group_chat import GroupChatStore
+from study_store import StudyStore
 
 HERE = Path(__file__).resolve().parent
 DEFAULT_CONFIG = HERE / "config.toml"
@@ -118,6 +119,7 @@ class ServerState:
         self.settings = Settings(data_dir / "settings.json")
         self.usage = UsageReader(data_dir=data_dir)
         self.memory = MemoryStore(data_dir)
+        self.study = StudyStore(data_dir)
 
         self.attachments_dir = data_dir / "attachments"
         self.attachments_dir.mkdir(parents=True, exist_ok=True)
@@ -262,6 +264,19 @@ class RequestHandler(BaseHTTPRequestHandler):
             self._send_json(200, {"ok": True, "pending": self.state.memory.list_pending()})
             return
 
+        if path == "/study/status":
+            self._send_json(200, self.state.study.status())
+            return
+        if path == "/study/game":
+            self._send_json(200, self.state.study.game())
+            return
+        if path == "/study/sources":
+            self._send_json(200, {"ok": True, "sources": self.state.study.list_sources()})
+            return
+        if path.startswith("/study/search"):
+            self._handle_study_search()
+            return
+
         # ── Group chat GET ──
         if path == "/group/roster":
             self._handle_group_roster()
@@ -327,6 +342,24 @@ class RequestHandler(BaseHTTPRequestHandler):
         elif path == "/memory/reindex":
             n = self.state.memory.reindex()
             self._send_json(200, {"ok": True, "indexed": n})
+        elif path == "/study/sources/add":
+            self._handle_study_source_add(body)
+        elif path == "/study/sources/delete":
+            self._handle_study_source_delete(body)
+        elif path == "/study/sources/complete":
+            self._handle_study_source_complete(body)
+        elif path == "/study/ask":
+            self._handle_study_ask(body)
+        elif path == "/study/tasks/add":
+            self._handle_study_task_add(body)
+        elif path == "/study/tasks/complete":
+            self._handle_study_task_complete(body)
+        elif path == "/study/tasks/delete":
+            self._handle_study_task_delete(body)
+        elif path == "/study/shop/buy":
+            self._handle_study_shop_buy(body)
+        elif path == "/study/shop/use":
+            self._handle_study_shop_use(body)
         # ── Group chat POST ──
         elif path == "/group/send":
             self._handle_group_send(body)
@@ -338,6 +371,34 @@ class RequestHandler(BaseHTTPRequestHandler):
             self._send_json(404, {"error": "not found"})
 
     # ---- Chat handlers ----
+
+    def _study_tool_prompt(self) -> str:
+        try:
+            game = self.state.study.game()
+            sources = self.state.study.list_sources()[:12]
+        except Exception:
+            game = {"points": 0, "tasks": [], "shop": []}
+            sources = []
+        pending = [t for t in game.get("tasks", []) if t.get("status") == "pending"][:10]
+        lines = [
+            "--- STUDY TOOL PROTOCOL ---",
+            "你可以用隐藏 JSON 工具控制学习系统。工具 JSON 会被 CcCompanion 执行并从聊天显示中隐藏。",
+            "只有在你真的要创建任务、判作业、加减分、发道具、上架限时道具或完成资料时才输出工具 JSON。",
+            "请把工具 JSON 放在独立的 ```json 代码块里；自然语言回复照常写在代码块外。",
+            f"当前积分: {game.get('points', 0)}",
+            "待完成任务: " + ("; ".join(f"{t.get('id')}={t.get('title')}" for t in pending) if pending else "无"),
+            "商店道具ID: " + ", ".join(i.get("id", "") for i in game.get("shop", [])),
+            "资料ID: " + ("; ".join(f"{s.get('id')}={s.get('title')}" for s in sources) if sources else "无"),
+            "可用格式示例:",
+            '{"study_tool":{"action":"create_task","title":"HTML 表单小测","description":"回答后在 Study 页面提交","questions":["label 的 for 属性有什么用？","button 默认 type 是什么？"],"source_id":"src_0001","minutes":30,"reward":10,"penalty":-5}}',
+            '{"task_judge":{"id":"task_0001","passed":true,"score":10,"comment":"完成得很好"}}',
+            '{"add_points":5,"reason":"主动复习奖励"}',
+            '{"grant_item":{"id":"double","name":"双倍积分","desc":"下个任务双倍"}}',
+            '{"custom_item":{"name":"限时亲亲券","desc":"完成下一题后兑现","price":20,"effect":"鼓励","minutes":60}}',
+            '{"complete_source":"src_0001"}',
+            "--- END STUDY TOOL PROTOCOL ---",
+        ]
+        return "\n".join(lines)
 
     def _handle_chat_send(self, body: dict[str, Any]):
         text = body.get("text", "").strip()
@@ -364,6 +425,11 @@ class RequestHandler(BaseHTTPRequestHandler):
             if mem_ctx:
                 injected = f"{mem_ctx}\n\n{injected}"
 
+        study_ctx = self.state.study.context_for(text, limit=5)
+        if study_ctx:
+            injected = f"{study_ctx}\n\n{injected}"
+        injected = f"{self._study_tool_prompt()}\n\n{injected}"
+
         self.state.typing_state = {"is_typing": True, "since": rec["ts"]}
 
         session = self.state.active_session
@@ -383,6 +449,33 @@ class RequestHandler(BaseHTTPRequestHandler):
             logger.warning("tmux inject fail: %s", e)
 
         self._send_json(200, {"ok": True, "record": rec})
+
+    def _inject_to_active_claude(self, text: str, source: str = "pwa", context: str = "") -> dict[str, Any]:
+        rec = self.state.chat.append(role="user", text=text, source=source)
+        ts_prefix = "[" + datetime.now().strftime("%Y-%m-%d %H:%M:%S") + "]"
+        injected = f"{ts_prefix} {text}"
+        tool_prompt = self._study_tool_prompt()
+        if context:
+            injected = f"{tool_prompt}\n\n{context}\n\n{injected}"
+        else:
+            injected = f"{tool_prompt}\n\n{injected}"
+        self.state.typing_state = {"is_typing": True, "since": rec["ts"]}
+        session = self.state.active_session
+        try:
+            subprocess.Popen(
+                ["tmux", "load-buffer", "-"],
+                stdin=subprocess.PIPE,
+            ).communicate(input=injected.encode("utf-8"))
+            subprocess.run(["tmux", "paste-buffer", "-t", session, "-p"], check=False)
+            subprocess.run(["tmux", "send-keys", "-t", session, "Enter"], check=False)
+            threading.Thread(
+                target=self._watch_reply_once,
+                args=(session, rec["ts"]),
+                daemon=True,
+            ).start()
+        except Exception as e:
+            logger.warning("tmux inject fail: %s", e)
+        return rec
 
     def _capture_tmux(self, session: str, lines: int = 40) -> str:
         try:
@@ -467,7 +560,14 @@ class RequestHandler(BaseHTTPRequestHandler):
             recent = self.state.chat.tail(6)
             if any(r.get("role") == "assistant" and r.get("text") == reply for r in recent):
                 return
-            self.state.chat.append(role="assistant", text=reply, source="claude-code")
+            tool_result = self.state.study.apply_ai_tools(reply)
+            display_reply = tool_result.get("display_text") or ("学习状态已更新。" if tool_result.get("applied") else reply)
+            self.state.chat.append(
+                role="assistant",
+                text=display_reply,
+                source="claude-code",
+                metadata={"study_tools": tool_result.get("applied", [])} if tool_result.get("applied") else None,
+            )
             self.state.typing_state = {"is_typing": False, "since": None}
             logger.info("captured assistant reply for %s (%d chars)", user_ts, len(reply))
             return
@@ -478,7 +578,14 @@ class RequestHandler(BaseHTTPRequestHandler):
             self._send_json(400, {"error": "text required"})
             return
         source = body.get("source", "claude-code")
-        rec = self.state.chat.append(role="assistant", text=text, source=source)
+        tool_result = self.state.study.apply_ai_tools(text) if source in {"claude-code", "study", "assistant"} else {"display_text": text, "applied": []}
+        display_text = tool_result.get("display_text") or ("学习状态已更新。" if tool_result.get("applied") else text)
+        rec = self.state.chat.append(
+            role="assistant",
+            text=display_text,
+            source=source,
+            metadata={"study_tools": tool_result.get("applied", [])} if tool_result.get("applied") else None,
+        )
         self.state.typing_state = {"is_typing": False, "since": None}
         self._send_json(200, {"ok": True, "record": rec})
 
@@ -737,6 +844,137 @@ class RequestHandler(BaseHTTPRequestHandler):
             return
         ok = self.state.memory.reject_pending(id)
         self._send_json(200 if ok else 404, {"ok": ok})
+
+    # ---- Study handlers ----
+
+    def _handle_study_search(self):
+        qs = parse_qs(urlparse(self.path).query)
+        q = qs.get("q", [""])[0]
+        source_id = qs.get("source_id", [None])[0]
+        try:
+            limit = int(qs.get("limit", ["8"])[0])
+        except Exception:
+            limit = 8
+        limit = min(max(limit, 1), 30)
+        hits = self.state.study.search(q, limit=limit, source_id=source_id)
+        self._send_json(200, {"ok": True, "hits": hits, "count": len(hits)})
+
+    def _handle_study_source_add(self, body: dict[str, Any]):
+        try:
+            source = self.state.study.add_source(
+                title=body.get("title", ""),
+                text=body.get("text", ""),
+                url=body.get("url", ""),
+                topic=body.get("topic", ""),
+                kind=body.get("kind", "text"),
+            )
+            self._send_json(200, {"ok": True, "source": source})
+        except ValueError as e:
+            self._send_json(400, {"error": str(e)})
+        except Exception as e:
+            logger.warning("study source add failed: %s", e)
+            self._send_json(500, {"error": str(e)})
+
+    def _handle_study_source_delete(self, body: dict[str, Any]):
+        source_id = body.get("id", "")
+        if not source_id:
+            self._send_json(400, {"error": "id required"})
+            return
+        ok = self.state.study.delete(source_id)
+        self._send_json(200 if ok else 404, {"ok": ok})
+
+    def _handle_study_source_complete(self, body: dict[str, Any]):
+        source_id = body.get("id", "")
+        if not source_id:
+            self._send_json(400, {"error": "id required"})
+            return
+        completed = bool(body.get("completed", True))
+        source = self.state.study.complete(source_id, completed=completed)
+        self._send_json(200 if source else 404, {"ok": source is not None, "source": source})
+
+    def _handle_study_ask(self, body: dict[str, Any]):
+        question = body.get("question", "").strip()
+        source_id = body.get("source_id") or None
+        mode = body.get("mode", "coach")
+        if not question:
+            self._send_json(400, {"error": "question required"})
+            return
+
+        source = self.state.study.get(source_id) if source_id else None
+        ctx = self.state.study.context_for(question + " " + (source.get("title", "") if source else ""), limit=6, source_id=source_id)
+        system = [
+            "--- STUDY COACH MODE ---",
+            "你是 CcCompanion 里的学习导师，语气亲密、耐心、直接。",
+            "优先依据 STUDY KNOWLEDGE CONTEXT 回答；如果资料不足，明确说资料里没有，并给出下一步学习建议。",
+            "回答结构：先给结论，再拆步骤，最后给 1-3 个小练习或检查问题。",
+            "不要编造来源，不要要求用户再去设置 API。",
+        ]
+        if source:
+            system.append(f"当前资料: {source.get('title', '')}")
+        if mode == "quiz":
+            system.append("当前模式是出题：请根据资料出 3 道小测，不要直接给答案，等用户回答后再批改。")
+        elif mode == "explain":
+            system.append("当前模式是讲解：请用适合初学者的方式解释，并指出最容易误解的点。")
+        context = "\n".join(system)
+        if ctx:
+            context = f"{context}\n\n{ctx}"
+        rec = self._inject_to_active_claude(question, source="study", context=context)
+        self._send_json(200, {"ok": True, "record": rec, "context_used": bool(ctx)})
+
+    def _handle_study_task_add(self, body: dict[str, Any]):
+        try:
+            task = self.state.study.add_task(
+                body.get("title", ""),
+                minutes=int(body.get("minutes", 30) or 30),
+                reward=int(body.get("reward", 10) or 10),
+                penalty=int(body.get("penalty", -5) or -5),
+                description=body.get("description", ""),
+                questions=body.get("questions") if isinstance(body.get("questions"), list) else None,
+                source_id=body.get("source_id", ""),
+            )
+            self._send_json(200, {"ok": True, "task": task, "game": self.state.study.game()})
+        except ValueError as e:
+            self._send_json(400, {"error": str(e)})
+        except Exception as e:
+            self._send_json(500, {"error": str(e)})
+
+    def _handle_study_task_complete(self, body: dict[str, Any]):
+        task_id = body.get("id", "")
+        if not task_id:
+            self._send_json(400, {"error": "id required"})
+            return
+        task = self.state.study.complete_task(task_id, passed=bool(body.get("passed", True)), note=body.get("note", ""))
+        self._send_json(200 if task else 404, {"ok": task is not None, "task": task, "game": self.state.study.game()})
+
+    def _handle_study_task_delete(self, body: dict[str, Any]):
+        task_id = body.get("id", "")
+        if not task_id:
+            self._send_json(400, {"error": "id required"})
+            return
+        ok = self.state.study.delete_task(task_id, free=bool(body.get("free", False)))
+        self._send_json(200 if ok else 404, {"ok": ok, "game": self.state.study.game()})
+
+    def _handle_study_shop_buy(self, body: dict[str, Any]):
+        item_id = body.get("id", "")
+        if not item_id:
+            self._send_json(400, {"error": "id required"})
+            return
+        try:
+            result = self.state.study.buy_item(item_id)
+            self._send_json(200, {"ok": True, **result})
+        except ValueError as e:
+            self._send_json(400, {"error": str(e)})
+
+    def _handle_study_shop_use(self, body: dict[str, Any]):
+        item_id = body.get("id", "")
+        if not item_id:
+            self._send_json(400, {"error": "id required"})
+            return
+        try:
+            result = self.state.study.use_item(item_id)
+            self._send_json(200, {"ok": True, **result})
+        except ValueError as e:
+            self._send_json(400, {"error": str(e)})
 
     # ---- Group chat handlers ----
 

@@ -5,11 +5,12 @@ import UsageView from './UsageView';
 import SettingsView from './SettingsView';
 import MemoryView from './MemoryView';
 import GroupView from './GroupView';
+import StudyView from './StudyView';
 import { Sidebar } from './Sidebar';
 import { NavHandle, Toast } from './Shell';
 import './App.css';
 
-type Page = 'chat' | 'terminal' | 'usage' | 'settings' | 'memory' | 'group';
+type Page = 'chat' | 'terminal' | 'usage' | 'settings' | 'memory' | 'group' | 'study';
 
 function App() {
   const [page, setPage] = useState<Page>('chat');
@@ -27,6 +28,7 @@ function App() {
     <div className="device">
       {page === 'chat' && <ChatView openSidebar={() => setSidebarOpen(true)} showToast={showToast} />}
       {page === 'terminal' && <TerminalView openSidebar={() => setSidebarOpen(true)} />}
+      {page === 'study' && <StudyView openSidebar={() => setSidebarOpen(true)} showToast={showToast} />}
       {page === 'memory' && <MemoryView openSidebar={() => setSidebarOpen(true)} showToast={showToast} />}
       {page === 'usage' && <UsageView openSidebar={() => setSidebarOpen(true)} showToast={showToast} />}
       {page === 'settings' && <SettingsView openSidebar={() => setSidebarOpen(true)} showToast={showToast} />}
