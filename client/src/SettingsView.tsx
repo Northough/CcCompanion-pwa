@@ -1,8 +1,10 @@
 import { useState, useEffect } from 'react';
-import { apiGet, apiPost, getServerUrl, setServerUrl, getSecret, setSecret } from './api';
-import { IconMenu, IconDot, IconCheck, IconDatabase, IconBrain } from './Icons';
+import { apiGet, getServerUrl, setServerUrl, getSecret, setSecret } from './api';
+import { IconMenu, IconDot } from './Icons';
 import { TopBar, IconButton } from './Shell';
 import { getProfile, saveProfile, notifyProfileChanged, readAvatarFile, type Profile } from './profile';
+import { addCommand } from './api/commandTransport';
+import { addLocalMessage, clearLocalMessages } from './api/localEcho';
 
 /* ── Design-original building blocks ── */
 
@@ -68,24 +70,17 @@ export default function SettingsView({ openSidebar, showToast }: { openSidebar: 
   const [url, setUrl] = useState(getServerUrl());
   const [secret, setSecretState] = useState(getSecret());
   const [diag, setDiag] = useState<Record<string, any> | null>(null);
-  const [serverSettings, setServerSettings] = useState<Record<string, unknown>>({});
   const [profile, setProfile] = useState<Profile>(getProfile);
-  const [injectionResult, setInjectionResult] = useState<any>(null);
+  const [commandMode, setCommandMode] = useState<'mock' | 'real'>(() => localStorage.getItem('cc_command_transport') === 'mock' ? 'mock' : 'real');
 
   const runDiag = async () => {
     try {
       const d = await apiGet('/diag');
       setDiag(d);
-      if (d.ok) { const s = await apiGet('/settings'); if (s.ok) setServerSettings(s.settings); }
     } catch { setDiag({ ok: false, error: 'unreachable' }); }
   };
 
   useEffect(() => { runDiag(); }, []);
-
-  const patchSetting = async (key: string, value: unknown) => {
-    await apiPost('/settings', { key, value });
-    setServerSettings(s => ({ ...s, [key]: value }));
-  };
 
   const quickConnect = () => {
     const isLocal = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
@@ -154,45 +149,45 @@ export default function SettingsView({ openSidebar, showToast }: { openSidebar: 
           } />
         </SettingsGroup>
 
-        {/* ── 3. Memory mode ── */}
-        <SettingsGroup title="记忆模式" subtitle="Where memories are stored">
-          <div style={{ padding: '12px 14px 14px', display: 'flex', flexDirection: 'column', gap: 10 }}>
-            <MemoryModeCard icon={<IconDatabase size={20} />} title="本地记忆" subtitle="数据保存在当前服务器，无需额外部署。" selected={(serverSettings.memory_mode as string) === 'local'} onClick={() => patchSetting('memory_mode', 'local')} />
-            <MemoryModeCard icon={<IconBrain size={20} />} title="Worker" subtitle="使用外部 Worker 作为长期记忆库（进阶）。" selected={(serverSettings.memory_mode as string) === 'worker'} onClick={() => patchSetting('memory_mode', 'worker')} />
-          </div>
-        </SettingsGroup>
-
-        {/* ── 4. Memory injection ── */}
-        <SettingsGroup title="记忆注入" subtitle="Inject relevant memories per turn">
-          <SettingsRow label="启用每轮注入" right={<Toggle on={!!serverSettings.memory_injection_enabled} onChange={v => patchSetting('memory_injection_enabled', v)} />} />
-          <SettingsRow label="Top K" right={<span className="mono" style={{ fontSize: 13, fontWeight: 600 }}>{String(serverSettings.memory_top_k ?? 8)}</span>} />
-          <div style={{ padding: '4px 14px 6px' }}>
-            <input type="range" min={1} max={20} value={Number(serverSettings.memory_top_k ?? 8)} onChange={e => patchSetting('memory_top_k', Number(e.target.value))} style={{ width: '100%', accentColor: 'var(--accent)' }} />
-          </div>
-          <SettingsRow label="Max chars" right={<span className="mono" style={{ fontSize: 13, fontWeight: 600 }}>{String(serverSettings.memory_max_chars ?? 1800)}</span>} />
-          <SettingsRow last>
-            <Button onClick={async () => {
-              try {
-                const r = await apiGet('/memory/search?q=test');
-                if (r.ok) { setInjectionResult(r.memories?.slice(0, 3)); showToast(`找到 ${r.memories?.length ?? 0} 条`, 'success'); }
-              } catch { showToast('搜索失败', 'error'); }
-            }}>测试搜索</Button>
+        {/* ── 3. Command float window ── */}
+        <SettingsGroup title="指令浮窗" subtitle="Command float window">
+          <SettingsRow label="演示模式" right={
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+              <span style={{ fontSize: 12, color: 'var(--muted)', fontWeight: 600 }}>{commandMode === 'mock' ? '开（自动推一条）' : '关（跟随对话）'}</span>
+              <Toggle on={commandMode === 'mock'} onChange={v => {
+                const next = v ? 'mock' : 'real';
+                localStorage.setItem('cc_command_transport', next);
+                setCommandMode(next);
+                showToast(next === 'mock' ? '演示模式：开（刷新生效）' : '演示模式：关，跟随对话', 'success');
+              }} />
+            </span>
+          } />
+          <SettingsRow>
+            <Button onClick={() => { addCommand(`test-${Date.now()}`, { title: '测试任务：喝口水再回来', countdown_seconds: 60 }); showToast('已弹出一个测试任务', 'success'); }}>弹一个测试任务</Button>
           </SettingsRow>
-          {injectionResult && (
-            <div style={{ padding: '0 14px 14px' }}>
-              <div style={{ background: 'var(--bg-2)', borderRadius: 12, padding: 12, display: 'flex', flexDirection: 'column', gap: 6 }}>
-                {injectionResult.map((m: any, i: number) => (
-                  <div key={i} style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
-                    <span className="mono" style={{ fontSize: 11, color: 'var(--accent)', fontWeight: 700, minWidth: 28 }}>{(m.confidence ?? 0).toFixed(2)}</span>
-                    <span style={{ fontSize: 12.5, color: 'var(--ink-2)', flex: 1 }}>{m.content}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
+          <div style={{ padding: '4px 14px 12px', fontSize: 11.5, color: 'var(--dim)', lineHeight: 1.5 }}>
+            正常时任务由 Claude 在回复里用 [[task:标题:秒]] 记号下达，浮窗自动弹出。点上面的按钮可立即弹一个测试任务（60 秒倒计时，任意页面都会出现）。
+          </div>
         </SettingsGroup>
 
-        {/* ── 5. Profile ── */}
+        {/* ── 4. UI preview helpers ── */}
+        <SettingsGroup title="界面测试" subtitle="Preview helpers">
+          <SettingsRow>
+            <div style={{ display: 'flex', gap: 8, width: '100%' }}>
+              <div style={{ flex: 1 }}><Button onClick={() => {
+                addLocalMessage('assistant', '好，那先专注 25 分钟，读完回来找我。');
+                addLocalMessage('user', '读完啦，比想象中快一点', { quoted_text: '好，那先专注 25 分钟，读完回来找我。' });
+                showToast('已生成测试消息，去 Chat 看看', 'success');
+              }}>生成测试聊天消息</Button></div>
+              <div style={{ flex: 1 }}><Button onClick={() => { clearLocalMessages(); showToast('已清空本地测试消息', 'success'); }}>清空测试消息</Button></div>
+            </div>
+          </SettingsRow>
+          <div style={{ padding: '4px 14px 12px', fontSize: 11.5, color: 'var(--dim)', lineHeight: 1.5 }}>
+            生成一条 AI 消息和一条带引用的用户消息，用于离线预览气泡对齐、时间与引用块（存在本地，刷新仍在）。
+          </div>
+        </SettingsGroup>
+
+        {/* ── 4. Profile ── */}
         <SettingsGroup title="个人资料" subtitle="Profile">
           <div style={{ padding: '12px 14px', display: 'flex', alignItems: 'center', gap: 14, borderBottom: '1px solid var(--line)' }}>
             <div onClick={() => pickAvatar('userAvatar')} style={{ width: 48, height: 48, borderRadius: '50%', background: profile.userAvatar ? 'transparent' : 'var(--accent)', border: profile.userAvatar ? '1px solid var(--line)' : 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', cursor: 'pointer', flexShrink: 0 }}>
@@ -222,27 +217,3 @@ export default function SettingsView({ openSidebar, showToast }: { openSidebar: 
   );
 }
 
-function MemoryModeCard({ icon, title, subtitle, selected, onClick }: { icon: React.ReactNode; title: string; subtitle: string; selected: boolean; onClick: () => void }) {
-  return (
-    <button onClick={onClick} style={{
-      display: 'flex', gap: 12, padding: 14, textAlign: 'left',
-      background: selected ? 'var(--accent-tint)' : 'var(--bg-2)',
-      border: `1.5px solid ${selected ? 'var(--accent)' : 'transparent'}`,
-      borderRadius: 16, color: 'var(--ink)', alignItems: 'flex-start'
-    }}>
-      <span style={{
-        width: 36, height: 36, borderRadius: 10,
-        background: selected ? 'var(--accent)' : 'var(--surface-2)',
-        color: selected ? '#fff' : 'var(--accent)',
-        display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0
-      }}>{icon}</span>
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 2 }}>
-          <span style={{ fontSize: 15, fontWeight: 700 }}>{title}</span>
-          {selected && <IconCheck size={16} style={{ color: 'var(--accent)' }} />}
-        </div>
-        <div style={{ fontSize: 12.5, color: 'var(--muted)', lineHeight: 1.45 }}>{subtitle}</div>
-      </div>
-    </button>
-  );
-}

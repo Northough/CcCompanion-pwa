@@ -1,14 +1,35 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useRef } from 'react';
 import { IconCopy, IconStar, IconCheck, IconThumbUp, IconThumbDown, IconRefresh, IconSpeak, IconImage } from './Icons';
 import { MarkdownBody, CodeBlock } from './ChatBlocks';
 import { getServerUrl } from './api';
 import { useProfile } from './profile';
 import { displayText } from './displayText';
 
-interface ChatRecord { ts: string; role: 'user' | 'assistant' | 'command'; text: string; source?: string; attachments?: { filename: string; url: string; size?: number }[]; }
+interface ChatRecord { ts: string; role: 'user' | 'assistant' | 'command'; text: string; source?: string; attachments?: { filename: string; url: string; size?: number }[]; quoted_ts?: string; quoted_text?: string; }
 
 function fmtTime(ts: string) {
   try { return new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }); } catch { return ts.slice(11, 16); }
+}
+
+// Long-press (500ms) → open the WeChat-style action menu at the press point
+function useLongPress(onLongPress: (x: number, y: number) => void, ms = 500) {
+  const timer = useRef<number | undefined>(undefined);
+  const start = (e: React.PointerEvent) => {
+    const { clientX, clientY } = e;
+    timer.current = window.setTimeout(() => onLongPress(clientX, clientY), ms);
+  };
+  const clear = () => { if (timer.current) window.clearTimeout(timer.current); };
+  return {
+    onPointerDown: start,
+    onPointerUp: clear,
+    onPointerLeave: clear,
+    onPointerCancel: clear,
+    onContextMenu: (e: React.MouseEvent) => e.preventDefault(),
+  };
+}
+
+function QuotedBlock({ text }: { text: string }) {
+  return <div className="msg-quote">{text}</div>;
 }
 
 // ── Block parser: splits assistant text into code blocks + markdown ──
@@ -84,12 +105,16 @@ function parseBlocks(text: string): Block[] {
 
 // ── User Message ──
 
-function UserMessage({ m }: { m: ChatRecord }) {
+function UserMessage({ m, onLongPress }: { m: ChatRecord; onLongPress?: (m: ChatRecord, x: number, y: number) => void }) {
   const profile = useProfile();
+  const lp = useLongPress((x, y) => onLongPress?.(m, x, y));
   return (
-    <div style={{ display: 'flex', justifyContent: 'flex-end', margin: '6px 0 18px', alignItems: 'center', gap: 8, minWidth: 0 }}>
-      <div style={{ maxWidth: 'calc(100% - 36px)', minWidth: 0, background: 'var(--user-bubble)', borderRadius: 20, padding: '12px 16px', color: 'var(--ink)', fontSize: 15.5, lineHeight: 1.55, display: 'flex', flexDirection: 'column', gap: 10, overflowWrap: 'anywhere', wordBreak: 'break-word' }}>
-        {m.attachments && m.attachments.length > 0 && (
+    <div style={{ display: 'flex', justifyContent: 'flex-end', margin: '6px 0 18px', alignItems: 'flex-start', gap: 8, minWidth: 0 }}>
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', minWidth: 0, maxWidth: 'calc(100% - 44px)' }}>
+        <span className="msg-time" style={{ marginBottom: 4 }}>{fmtTime(m.ts)}</span>
+        <div {...lp} style={{ minWidth: 0, maxWidth: '100%', background: 'var(--user-bubble)', borderRadius: '16px 4px 16px 16px', padding: '12px 16px', color: '#fff', fontSize: 15.5, lineHeight: 1.7, display: 'flex', flexDirection: 'column', gap: 10, overflowWrap: 'anywhere', wordBreak: 'break-word', userSelect: 'none' }}>
+          {m.quoted_text && <QuotedBlock text={m.quoted_text} />}
+          {m.attachments && m.attachments.length > 0 && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
             {m.attachments.map((a, i) => {
               const isImg = /\.(png|jpg|jpeg|gif|webp|bmp)$/i.test(a.filename);
@@ -97,8 +122,8 @@ function UserMessage({ m }: { m: ChatRecord }) {
               const fmtSize = (n?: number) => { if (n == null) return ''; if (n < 1024) return `${n}B`; if (n < 1048576) return `${(n / 1024).toFixed(1)}KB`; return `${(n / 1048576).toFixed(1)}MB`; };
               return (
                 <a key={i} href={`${getServerUrl()}${a.url}`} target="_blank" rel="noopener noreferrer"
-                  style={{ display: 'flex', alignItems: 'center', gap: 10, background: 'rgba(255,255,255,0.5)', border: '1px solid rgba(0,0,0,0.08)', borderRadius: 14, padding: '8px 12px', textDecoration: 'none', color: 'var(--ink)', maxWidth: '100%', minWidth: 0 }}>
-                  <div style={{ width: 32, height: 32, borderRadius: 8, background: isImg ? 'var(--accent-soft)' : 'var(--ink)', color: isImg ? 'var(--accent)' : 'var(--bg)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 9, fontWeight: 800, fontFamily: 'var(--font-mono)', flexShrink: 0 }}>
+                  style={{ display: 'flex', alignItems: 'center', gap: 10, background: 'rgba(255,255,255,0.88)', border: '1px solid rgba(255,255,255,0.5)', borderRadius: 14, padding: '8px 12px', textDecoration: 'none', color: 'var(--ink)', maxWidth: '100%', minWidth: 0 }}>
+                  <div style={{ width: 32, height: 32, borderRadius: 8, background: isImg ? 'var(--accent)' : 'var(--ink)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 9, fontWeight: 800, fontFamily: 'var(--font-mono)', flexShrink: 0 }}>
                     {isImg ? <IconImage size={14} /> : ext}
                   </div>
                   <div style={{ minWidth: 0, flex: 1 }}>
@@ -110,9 +135,10 @@ function UserMessage({ m }: { m: ChatRecord }) {
             })}
           </div>
         )}
-        {m.text && <div style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', wordBreak: 'break-word' }}>{displayText(m.text)}</div>}
+          {m.text && <div style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', wordBreak: 'break-word' }}>{displayText(m.text)}</div>}
+        </div>
       </div>
-      <AvatarBubble name={profile.userName} avatar={profile.userAvatar} size={28} bg="var(--accent)" fg="#fff" />
+      <AvatarBubble name={profile.userName} avatar={profile.userAvatar} size={34} bg="var(--accent)" fg="#fff" />
     </div>
   );
 }
@@ -132,18 +158,6 @@ function AvatarBubble({ name, avatar, size = 24, bg = 'var(--surface-2)', fg = '
         ? <img src={avatar} alt={name} style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: '50%' }} />
         : <span style={{ fontSize: size * 0.44, fontWeight: 800, color: fg, lineHeight: 1 }}>{initial}</span>
       }
-    </div>
-  );
-}
-
-// ── Assistant Header ──
-
-function AssistantHeader() {
-  const profile = useProfile();
-  return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 8 }}>
-      <AvatarBubble name={profile.claudeName} avatar={profile.claudeAvatar} size={24} />
-      <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', letterSpacing: '0.04em', textTransform: 'uppercase' }}>{profile.claudeName}</span>
     </div>
   );
 }
@@ -179,12 +193,14 @@ function MessageActions({ liked, setLiked, favorite, setFavorite, copied, onCopy
 
 // ── Assistant Message ──
 
-function AssistantMessage({ m, showToast }: { m: ChatRecord; showToast?: (msg: string, tone?: string) => void }) {
+function AssistantMessage({ m, showToast, onLongPress }: { m: ChatRecord; showToast?: (msg: string, tone?: string) => void; onLongPress?: (m: ChatRecord, x: number, y: number) => void }) {
+  const profile = useProfile();
   const [liked, setLiked] = useState(0);
   const [copied, setCopied] = useState(false);
   const [favorite, setFavorite] = useState(false);
 
   const blocks = useMemo(() => parseBlocks(m.text), [m.text]);
+  const lp = useLongPress((x, y) => onLongPress?.(m, x, y));
 
   const copy = () => {
     if (navigator.clipboard) navigator.clipboard.writeText(m.text);
@@ -193,15 +209,17 @@ function AssistantMessage({ m, showToast }: { m: ChatRecord; showToast?: (msg: s
   };
 
   return (
-    <div style={{ margin: '4px 0 22px' }}>
-      <AssistantHeader />
-      <div>
+    <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start', margin: '4px 0 22px' }}>
+      <AvatarBubble name={profile.claudeName} avatar={profile.claudeAvatar} size={34} />
+      <div style={{ flex: 1, minWidth: 0, marginRight: 40 }}>
+        <span className="msg-time" style={{ display: 'block', marginBottom: 4 }}>{fmtTime(m.ts)}</span>
+        {m.quoted_text && <QuotedBlock text={m.quoted_text} />}
         {blocks.map((b, i) => {
           if (b.type === 'code') return <CodeBlock key={i} lang={b.lang} code={b.code} />;
-          return <div key={i} className="md"><MarkdownBody text={displayText(b.text)} /></div>;
+          return <div key={i} className="md md-bubble" {...lp}><MarkdownBody text={displayText(b.text)} /></div>;
         })}
+        <MessageActions liked={liked} setLiked={setLiked} favorite={favorite} setFavorite={setFavorite} copied={copied} onCopy={copy} onSpeak={() => showToast?.('Speaking...')} onRegen={() => showToast?.('Regenerating...')} />
       </div>
-      <MessageActions liked={liked} setLiked={setLiked} favorite={favorite} setFavorite={setFavorite} copied={copied} onCopy={copy} onSpeak={() => showToast?.('Speaking...')} onRegen={() => showToast?.('Regenerating...')} />
     </div>
   );
 }
@@ -217,10 +235,44 @@ function CommandMessage({ m }: { m: ChatRecord }) {
   );
 }
 
+// ── Command receipt (完成/取消/超时) — shown as a small left-aligned note, not a user bubble ──
+
+const COMMAND_RECEIPT_RE = /^\s*(✓ 完成了|✕ 取消了|⏱ )/;
+
+function isCommandReceipt(text: string): boolean {
+  return COMMAND_RECEIPT_RE.test(text);
+}
+
+function CommandNote({ m }: { m: ChatRecord }) {
+  return <div className="msg-cmd-note">{displayText(m.text)}</div>;
+}
+
 // ── MessageRow (exported) ──
 
-export function MessageRow({ r, showToast }: { r: ChatRecord; showToast?: (msg: string, tone?: string) => void }) {
+export function MessageRow({ r, showToast, onLongPress, selectMode, selected, onToggleSelect }: {
+  r: ChatRecord;
+  showToast?: (msg: string, tone?: string) => void;
+  onLongPress?: (m: ChatRecord, x: number, y: number) => void;
+  selectMode?: boolean;
+  selected?: boolean;
+  onToggleSelect?: (m: ChatRecord) => void;
+}) {
   if (r.role === 'command') return <CommandMessage m={r} />;
-  if (r.role === 'user') return <UserMessage m={r} />;
-  return <AssistantMessage m={r} showToast={showToast} />;
+  const isReceipt = r.role === 'user' && isCommandReceipt(r.text);
+  const inner = isReceipt
+    ? <CommandNote m={r} />
+    : r.role === 'user'
+      ? <UserMessage m={r} onLongPress={selectMode ? undefined : onLongPress} />
+      : <AssistantMessage m={r} showToast={showToast} onLongPress={selectMode ? undefined : onLongPress} />;
+
+  // In multi-select mode, wrap selectable messages (user/assistant, not receipts) with a checkbox row
+  if (selectMode && !isReceipt) {
+    return (
+      <div className={`msg-select-row${selected ? ' is-selected' : ''}`} onClick={() => onToggleSelect?.(r)}>
+        <span className={`msg-select-check${selected ? ' is-on' : ''}`}>{selected ? '✓' : ''}</span>
+        <div style={{ flex: 1, minWidth: 0, pointerEvents: 'none' }}>{inner}</div>
+      </div>
+    );
+  }
+  return inner;
 }

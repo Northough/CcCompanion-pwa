@@ -9,10 +9,6 @@ from typing import Any
 DEFAULT = {
     "tts_enabled": False,
     "chat_sound_enabled": True,
-    "memory_mode": "local",               # "local" | "worker"
-    "memory_injection_enabled": False,
-    "memory_top_k": 8,
-    "memory_max_chars": 1800,
     "appearance_color_mode": "system",     # "system" | "light" | "dark"
     "appearance_font_size": "medium",      # "small" | "medium" | "large"
     "haptics_enabled": True,

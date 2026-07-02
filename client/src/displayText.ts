@@ -6,6 +6,7 @@ function hasCjk(value: string | undefined): boolean {
 
 export function displayText(value: string): string {
   return value
+    .replace(/\[\[task:[^\]]*\]\]/g, '')
     .replace(/—+/g, ',')
     .replace(/,/g, (comma, index, source) => {
       const prev = source[index - 1];

@@ -29,7 +29,6 @@ from chat_history import ChatHistory
 from favorites import Favorites
 from settings import Settings
 from usage import UsageReader
-from memory_store import MemoryStore
 from group_chat import GroupChatStore
 from study_store import StudyStore
 
@@ -121,7 +120,6 @@ class ServerState:
         )
         self.settings = Settings(data_dir / "settings.json")
         self.usage = UsageReader(data_dir=data_dir)
-        self.memory = MemoryStore(data_dir)
         self.study = StudyStore(data_dir)
 
         self.attachments_dir = data_dir / "attachments"
@@ -274,19 +272,6 @@ class RequestHandler(BaseHTTPRequestHandler):
             self._handle_diag()
             return
 
-        if path == "/memory/status":
-            self._send_json(200, self._memory_status())
-            return
-        if path == "/memory/list":
-            self._handle_memory_list()
-            return
-        if path.startswith("/memory/search"):
-            self._handle_memory_search()
-            return
-        if path == "/memory/pending":
-            self._send_json(200, {"ok": True, "pending": self.state.memory.list_pending()})
-            return
-
         if path == "/study/status":
             self._send_json(200, self.state.study.status())
             return
@@ -362,19 +347,10 @@ class RequestHandler(BaseHTTPRequestHandler):
             self._handle_chain_switch(body)
         elif path == "/chain/abort":
             self._handle_chain_abort(body)
-        elif path == "/memory/create":
-            self._handle_memory_create(body)
-        elif path == "/memory/expire":
-            self._handle_memory_expire(body)
-        elif path == "/memory/delete":
-            self._handle_memory_delete(body)
-        elif path == "/memory/pending/accept":
-            self._handle_memory_pending_accept(body)
-        elif path == "/memory/pending/reject":
-            self._handle_memory_pending_reject(body)
-        elif path == "/memory/reindex":
-            n = self.state.memory.reindex()
-            self._send_json(200, {"ok": True, "indexed": n})
+        elif path == "/chain/kill":
+            self._handle_chain_kill(body)
+        elif path == "/chain/restart":
+            self._handle_chain_restart(body)
         elif path == "/study/sources/add":
             self._handle_study_source_add(body)
         elif path == "/study/sources/delete":
@@ -428,14 +404,6 @@ class RequestHandler(BaseHTTPRequestHandler):
         injected = f"{ts_prefix} {text}"
         if rec.get("quoted_text"):
             injected = f'{ts_prefix} [引用 "{rec["quoted_text"]}"]\n{text}'
-
-        # Memory injection — prepend context to tmux inject only (not visible in chat)
-        injection_enabled = bool(self.state.settings.get("memory_injection_enabled", False))
-        if injection_enabled and text:
-            top_k = int(self.state.settings.get("memory_top_k", 8))
-            mem_ctx = self.state.memory.get_injection_context(text, top_k=top_k)
-            if mem_ctx:
-                injected = f"{mem_ctx}\n\n{injected}"
 
         self.state.typing_state = {"is_typing": True, "since": rec["ts"]}
 
@@ -860,69 +828,6 @@ class RequestHandler(BaseHTTPRequestHandler):
     def _handle_usage_active(self):
         data = self.state.usage.get_active()
         self._send_json(200, data)
-
-    # ---- Memory handlers ----
-
-    def _memory_status(self) -> dict[str, Any]:
-        s = self.state.memory.status()
-        s["injection_enabled"] = bool(self.state.settings.get("memory_injection_enabled", False))
-        s["top_k"] = int(self.state.settings.get("memory_top_k", 8))
-        return s
-
-    def _handle_memory_list(self):
-        qs = parse_qs(urlparse(self.path).query)
-        type_filter = qs.get("type", [None])[0]
-        self._send_json(200, {"ok": True, "memories": self.state.memory.list_all(type_filter)})
-
-    def _handle_memory_search(self):
-        qs = parse_qs(urlparse(self.path).query)
-        q = qs.get("q", [""])[0]
-        self._send_json(200, {"ok": True, "memories": self.state.memory.search(q)})
-
-    def _handle_memory_create(self, body: dict[str, Any]):
-        type_ = body.get("type", "instruction")
-        content = body.get("content", "").strip()
-        if not content:
-            self._send_json(400, {"error": "content required"})
-            return
-        record = self.state.memory.create(
-            type=type_, content=content,
-            evidence=body.get("evidence", ""),
-            confidence=float(body.get("confidence", 1.0)),
-        )
-        self._send_json(200, {"ok": True, "memory": record})
-
-    def _handle_memory_expire(self, body: dict[str, Any]):
-        id = body.get("id", "")
-        if not id:
-            self._send_json(400, {"error": "id required"})
-            return
-        ok = self.state.memory.expire(id)
-        self._send_json(200 if ok else 404, {"ok": ok})
-
-    def _handle_memory_delete(self, body: dict[str, Any]):
-        id = body.get("id", "")
-        if not id:
-            self._send_json(400, {"error": "id required"})
-            return
-        ok = self.state.memory.delete(id)
-        self._send_json(200 if ok else 404, {"ok": ok})
-
-    def _handle_memory_pending_accept(self, body: dict[str, Any]):
-        id = body.get("id", "")
-        if not id:
-            self._send_json(400, {"error": "id required"})
-            return
-        result = self.state.memory.accept_pending(id)
-        self._send_json(200 if result else 404, {"ok": result is not None, "memory": result})
-
-    def _handle_memory_pending_reject(self, body: dict[str, Any]):
-        id = body.get("id", "")
-        if not id:
-            self._send_json(400, {"error": "id required"})
-            return
-        ok = self.state.memory.reject_pending(id)
-        self._send_json(200 if ok else 404, {"ok": ok})
 
     # ---- Study handlers ----
 
@@ -1349,6 +1254,38 @@ class RequestHandler(BaseHTTPRequestHandler):
         try:
             subprocess.run(["tmux", "send-keys", "-t", session, "C-c"], check=False)
             self._send_json(200, {"ok": True, "session": session})
+        except Exception as e:
+            self._send_json(500, {"error": str(e)})
+
+    def _handle_chain_kill(self, body: dict[str, Any]):
+        """Kill the process running in the session's pane (e.g. claude), leaving a fresh shell."""
+        session = body.get("session") or self.state.active_session
+        try:
+            result = subprocess.run(["tmux", "respawn-pane", "-k", "-t", session], capture_output=True, text=True, timeout=5)
+            if result.returncode != 0:
+                self._send_json(404, {"error": result.stderr.strip() or "session not found"})
+                return
+            self.state.typing_state = {"is_typing": False, "since": None}
+            self._send_json(200, {"ok": True, "session": session})
+        except Exception as e:
+            self._send_json(500, {"error": str(e)})
+
+    def _handle_chain_restart(self, body: dict[str, Any]):
+        """Reset Claude in the current session: kill the pane's process, then relaunch `claude`.
+
+        Same tmux session name (so the conversation binding + chat history are kept),
+        but Claude's in-memory context is fully fresh.
+        """
+        session = body.get("session") or self.state.active_session
+        try:
+            result = subprocess.run(["tmux", "respawn-pane", "-k", "-t", session], capture_output=True, text=True, timeout=5)
+            if result.returncode != 0:
+                self._send_json(404, {"error": result.stderr.strip() or "session not found"})
+                return
+            time.sleep(0.6)
+            subprocess.run(["tmux", "send-keys", "-t", session, "claude", "Enter"], check=False, timeout=5)
+            self.state.typing_state = {"is_typing": False, "since": None}
+            self._send_json(200, {"ok": True, "session": session, "relaunched": True})
         except Exception as e:
             self._send_json(500, {"error": str(e)})
 

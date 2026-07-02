@@ -24,16 +24,23 @@ function fmtTime(ts: string) {
 }
 
 const GROUP_SELF_COLOR_KEY = 'cc_group_self_color';
-const GROUP_SWATCHES = ['#D94683', '#E779A8', '#8B6FD1', '#4C9A78', '#D98B2B', '#D94A62'];
+const GROUP_SWATCHES = ['#7b8fa1', '#c4b8a8', '#8c8266', '#5f8a70', '#b0894a', '#a56a5c'];
 const LEGACY_GROUP_COLORS: Record<string, string> = {
-  '#B85C2E': '#D94683',
-  '#4F7B4A': '#E779A8',
-  '#3A6FA0': '#8B6FD1',
-  '#8B5CF6': '#4C9A78',
-  '#2F7D6B': '#4C9A78',
-  '#B7791F': '#D98B2B',
-  '#5466A3': '#8B6FD1',
-  '#B75353': '#D94A62',
+  // Old pink/purple identity colors → dukou earthy palette
+  '#D94683': '#7b8fa1',
+  '#E779A8': '#c4b8a8',
+  '#8B6FD1': '#8c8266',
+  '#4C9A78': '#5f8a70',
+  '#D98B2B': '#b0894a',
+  '#D94A62': '#a56a5c',
+  '#B85C2E': '#b0894a',
+  '#4F7B4A': '#5f8a70',
+  '#3A6FA0': '#7b8fa1',
+  '#8B5CF6': '#8c8266',
+  '#2F7D6B': '#5f8a70',
+  '#B7791F': '#b0894a',
+  '#5466A3': '#7b8fa1',
+  '#B75353': '#a56a5c',
 };
 
 function normalizeGroupColor(color?: string, fallback = '#888888'): string {
@@ -114,9 +121,9 @@ export default function GroupView({ openSidebar, showToast }: { openSidebar: () 
   const [identityOpen, setIdentityOpen] = useState(false);
   const [selectedMemberId, setSelectedMemberId] = useState(senderId);
   const [selfName, setSelfName] = useState(() => getProfile().userName || 'Me');
-  const [selfColor, setSelfColor] = useState(() => normalizeGroupColor(localStorage.getItem(GROUP_SELF_COLOR_KEY) || '#D94683', '#D94683'));
+  const [selfColor, setSelfColor] = useState(() => normalizeGroupColor(localStorage.getItem(GROUP_SELF_COLOR_KEY) || '#7b8fa1', '#7b8fa1'));
   const [draftName, setDraftName] = useState(() => getProfile().userName || 'Me');
-  const [draftColor, setDraftColor] = useState(() => normalizeGroupColor(localStorage.getItem(GROUP_SELF_COLOR_KEY) || '#D94683', '#D94683'));
+  const [draftColor, setDraftColor] = useState(() => normalizeGroupColor(localStorage.getItem(GROUP_SELF_COLOR_KEY) || '#7b8fa1', '#7b8fa1'));
 
   // @mention state
   const [showMentions, setShowMentions] = useState(false);

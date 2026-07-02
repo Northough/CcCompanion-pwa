@@ -1,34 +1,38 @@
-@import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@400;500;600;700;900&family=JetBrains+Mono:wght@400;500;600&display=swap');
 
 :root {
-  --bg: #FFF4F8;
-  --bg-2: #FBE5EE;
-  --surface: #FFF9FC;
-  --surface-2: #FFFFFF;
-  --ink: #2E2028;
-  --ink-2: #4C3541;
-  --muted: #7B5D6A;
-  --dim: #B08C9B;
-  --line: #F0CAD8;
-  --line-2: #E5ADC2;
-  --accent: #D94683;
-  --accent-2: #8B6FD1;
-  --accent-soft: #F7B8CF;
-  --accent-tint: #FDEBF2;
-  --reward: #D98B2B;
-  --reward-tint: #FFF0C8;
-  --study: #7B61C9;
-  --study-tint: #F0EAFF;
-  --user-bubble: #FFE4EF;
-  --good: #4C9A78;
-  --warn: #C47B19;
-  --bad: #D94A62;
-  --radius-card: 24px;
-  --radius-input: 28px;
+  /* Warm paper base — from dukou-site */
+  --bg: #f5f3ef;
+  --bg-2: #ece8e0;
+  --surface: #faf8f3;
+  --surface-2: #ffffff;
+  --ink: #2c2c2c;
+  --ink-2: #45443f;
+  --muted: #8a8680;
+  --dim: #a9a49b;
+  --line: #e3ded4;
+  --line-2: #d3ccbf;
+  /* Cold slate-blue primary accent + warm taupe */
+  --accent: #7b8fa1;
+  --accent-2: #6f8390;
+  --accent-soft: #b9c6d0;
+  --accent-tint: #e8edf0;
+  /* Warm gold reward */
+  --reward: #b0894a;
+  --reward-tint: #efe7d4;
+  /* Study — earthy olive-taupe */
+  --study: #8c8266;
+  --study-tint: #ece8dc;
+  --user-bubble: #7b8fa1;
+  --good: #5f8a70;
+  --warn: #b0894a;
+  --bad: #a56a5c;
+  --radius-card: 20px;
+  --radius-input: 24px;
   --radius-pill: 999px;
-  --shadow-sm: 0 1px 2px rgba(88,38,58,0.06);
-  --shadow-md: 0 10px 28px rgba(179,74,114,0.11), 0 1px 3px rgba(88,38,58,0.06);
-  --font-ui: 'Manrope', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --shadow-sm: 0 1px 2px rgba(40,40,46,0.05);
+  --shadow-md: 0 12px 30px rgba(40,40,46,0.10), 0 1px 3px rgba(40,40,46,0.05);
+  --font-ui: 'Noto Serif SC', 'Source Han Serif SC', 'Songti SC', 'Noto Serif', serif;
   --font-mono: 'JetBrains Mono', ui-monospace, Menlo, monospace;
   font-family: var(--font-ui);
   color-scheme: light;
@@ -58,7 +62,7 @@ button { font-family: inherit; cursor: pointer; }
 .md p:last-child { margin-bottom: 0; }
 .md strong { font-weight: 700; }
 .md code { font-family: var(--font-mono); font-size: 13px; background: var(--accent-tint); padding: 1px 5px; border-radius: 5px; }
-.md pre { background: #2A1722; color: #FFEAF2; border-radius: 12px; padding: 12px; overflow-x: auto; margin: 8px 0; }
+.md pre { background: #2a2d32; color: #e8e4dc; border-radius: 12px; padding: 12px; overflow-x: auto; margin: 8px 0; }
 .md pre code { background: none; padding: 0; color: inherit; }
 .md ul, .md ol { margin: 0 0 12px; padding-left: 20px; }
 .md li { margin: 3px 0; }
@@ -67,4 +71,13 @@ button { font-family: inherit; cursor: pointer; }
   word-break: break-word;
 }
 
-.codeblock { background: #2A1722; color: #FFEAF2; border-radius: 12px; padding: 12px 14px; font-family: var(--font-mono); font-size: 12.5px; line-height: 1.5; overflow-x: auto; margin: 6px 0 12px; white-space: pre; }
+.codeblock { background: #2a2d32; color: #e8e4dc; border-radius: 12px; padding: 12px 14px; font-family: var(--font-mono); font-size: 12.5px; line-height: 1.5; overflow-x: auto; margin: 6px 0 12px; white-space: pre; }
+
+/* Monospace helper — code-like content stays mono under the serif UI font */
+.mono { font-family: var(--font-mono); }
+.codeblock-head { display: flex; align-items: center; justify-content: space-between; padding: 7px 12px 5px; font-family: var(--font-mono); font-size: 11px; color: var(--muted); }
+/* Syntax highlight tokens (dark code card) */
+.codeblock .kw { color: #9db8c9; }
+.codeblock .str { color: #b3c4a0; }
+.codeblock .num { color: #d0b58a; }
+.codeblock .com { color: #7d827f; font-style: italic; }

@@ -1,9 +1,9 @@
 import { useEffect, useState, useCallback } from 'react';
-import { IconClose, IconPlus, IconChat, IconChart, IconCog, IconTerminal, IconBrain, IconUsers, IconDatabase, IconTrash } from './Icons';
+import { IconClose, IconPlus, IconChat, IconChart, IconCog, IconTerminal, IconClock, IconUsers, IconDatabase, IconTrash, IconStar } from './Icons';
 import { IconButton } from './Shell';
 import { apiGet, apiPost } from './api';
 
-type Page = 'chat' | 'terminal' | 'usage' | 'settings' | 'memory' | 'group' | 'study';
+type Page = 'chat' | 'terminal' | 'usage' | 'settings' | 'schedule' | 'group' | 'study' | 'favorites';
 interface Conversation { id: string; title: string; preview?: string; updated_at?: string; message_count?: number; active?: boolean; tmux_session?: string }
 
 function fmtConversationTime(ts?: string) {
@@ -66,10 +66,11 @@ export function Sidebar({ open, onClose, page, goto, showToast, onChatChanged }:
   const nav = (p: Page) => { goto(p); onClose(); };
   return (
     <>
-      <div className="sidebar-scrim" onClick={onClose} style={{ pointerEvents: open ? 'auto' : 'none', background: open ? 'rgba(54,24,38,0.38)' : 'transparent' }} />
+      <div className="sidebar-scrim" onClick={onClose} style={{ pointerEvents: open ? 'auto' : 'none', background: open ? 'rgba(28,28,26,0.36)' : 'transparent' }} />
       <aside className={`sidebar-drawer${open ? ' open' : ''}`}>
-        <div style={{ padding: '16px 18px 8px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <span style={{ fontSize: 18, fontWeight: 800, letterSpacing: '-0.02em', color: 'var(--ink)' }}>Cc</span>
+        <div style={{ padding: '12px 10px 8px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid var(--line)' }}>
+          <span style={{ width: 42, flexShrink: 0 }} />
+          <span style={{ fontSize: 18, fontWeight: 800, letterSpacing: '0.05em', color: '#a2764f' }}>Functions</span>
           <IconButton onClick={onClose}><IconClose size={20} /></IconButton>
         </div>
         <nav className="sidebar-nav sidebar-primary">
@@ -99,7 +100,8 @@ export function Sidebar({ open, onClose, page, goto, showToast, onChatChanged }:
         <nav className="sidebar-nav sidebar-secondary">
           <button className={`drawer-item${page === 'study' ? ' active' : ''}`} onClick={() => nav('study')}><IconDatabase size={20} /><span>Study</span></button>
           <button className={`drawer-item${page === 'terminal' ? ' active' : ''}`} onClick={() => nav('terminal')}><IconTerminal size={20} /><span>Terminal</span></button>
-          <button className={`drawer-item${page === 'memory' ? ' active' : ''}`} onClick={() => nav('memory')}><IconBrain size={20} /><span>Memory</span></button>
+          <button className={`drawer-item${page === 'schedule' ? ' active' : ''}`} onClick={() => nav('schedule')}><IconClock size={20} /><span>Schedule</span></button>
+          <button className={`drawer-item${page === 'favorites' ? ' active' : ''}`} onClick={() => nav('favorites')}><IconStar size={20} /><span>Favorites</span></button>
           <button className={`drawer-item${page === 'group' ? ' active' : ''}`} onClick={() => nav('group')}><IconUsers size={20} /><span>Group</span></button>
           <button className={`drawer-item${page === 'usage' ? ' active' : ''}`} onClick={() => nav('usage')}><IconChart size={20} /><span>Usage</span></button>
           <button className={`drawer-item${page === 'settings' ? ' active' : ''}`} onClick={() => nav('settings')}><IconCog size={20} /><span>Settings</span></button>
